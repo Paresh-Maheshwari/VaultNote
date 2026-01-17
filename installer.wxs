@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Product Id="*" Name="VaultNote" Language="1033" Version="1.0.6" Manufacturer="VaultNote" UpgradeCode="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perUser" />
+    
+    <MajorUpgrade DowngradeErrorMessage="A newer version of VaultNote is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    
+    <Feature Id="ProductFeature" Title="VaultNote" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="CleanupOnUninstall" />
+    </Feature>
+    
+    <Icon Id="VaultNote.ico" SourceFile="windows\runner\resources\app_icon.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="VaultNote.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Paresh-Maheshwari/VaultNote" />
+    <Property Id="ARPCOMMENTS" Value="Secure, encrypted notes with GitHub sync" />
+    
+    <!-- Installation progress messages -->
+    <Property Id="MSIUSEREALADMINDETECTION" Value="1" />
+    
+    <!-- Launch application after install -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch VaultNote" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]vaultnote.exe" />
+    <CustomAction Id="LaunchApplication" BinaryKey="WixCA" DllEntry="WixShellExec" Impersonate="yes" />
+    
+    <InstallExecuteSequence>
+      <Custom Action="LaunchApplication" After="InstallFinalize">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Custom>
+    </InstallExecuteSequence>
+    
+    <!-- License Agreement - RTF will be generated during build -->
+    <WixVariable Id="WixUILicenseRtf" Value="LICENSE.rtf" />
+    
+    <!-- Set the install directory property -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    
+    <UI>
+      <UIRef Id="WixUI_InstallDir" />
+    </UI>
+  </Product>
+  
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="INSTALLFOLDER" Name="VaultNote" />
+        <Directory Id="APPDATAFOLDER" Name="com.vaultnote.app" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="VaultNote"/>
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop" />
+      <Directory Id="AppDataFolder">
+        <Directory Id="ROAMINGDATAFOLDER" Name="com.vaultnote.app" />
+      </Directory>
+    </Directory>
+  </Fragment>
+  
+  <Fragment>
+    <!-- Remove user data on uninstall -->
+    <Component Id="CleanupOnUninstall" Guid="*" Directory="TARGETDIR">
+      <RegistryValue Root="HKCU" Key="Software\VaultNote" Name="Cleanup" Type="integer" Value="1" KeyPath="yes"/>
+      <util:RemoveFolderEx On="uninstall" Property="APPDATAFOLDERPATH" />
+      <util:RemoveFolderEx On="uninstall" Property="ROAMINGDATAFOLDERPATH" />
+    </Component>
+    
+    <Property Id="APPDATAFOLDERPATH">
+      <DirectorySearch Id="FindAppDataFolder" Path="[LocalAppDataFolder]com.vaultnote.app" />
+    </Property>
+    <Property Id="ROAMINGDATAFOLDERPATH">
+      <DirectorySearch Id="FindRoamingDataFolder" Path="[AppDataFolder]com.vaultnote.app" />
+    </Property>
+  </Fragment>
+  
+  <Fragment>
+    <ComponentGroup Id="Shortcuts">
+      <!-- Start Menu Shortcut -->
+      <Component Id="StartMenuShortcut" Guid="*" Directory="ApplicationProgramsFolder">
+        <Shortcut Id="StartMenuShortcut" 
+                  Name="VaultNote" 
+                  Target="[INSTALLFOLDER]vaultnote.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="VaultNote.ico" />
+        <RemoveFolder Id="RemoveStartMenuFolder" Directory="ApplicationProgramsFolder" On="uninstall"/>
+        <RegistryValue Root="HKCU" Key="Software\VaultNote" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+      
+      <!-- Desktop Shortcut -->
+      <Component Id="DesktopShortcut" Guid="*" Directory="DesktopFolder">
+        <Shortcut Id="DesktopShortcut" 
+                  Name="VaultNote" 
+                  Target="[INSTALLFOLDER]vaultnote.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="VaultNote.ico" />
+        <RegistryValue Root="HKCU" Key="Software\VaultNote" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

@@ -1,0 +1,370 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'App version (e.g., 1.0.1)'
+        type: string
+        default: '1.0.0'
+      build_number:
+        description: 'Build number'
+        type: string
+        default: '1'
+      build_linux:
+        description: 'Build Linux'
+        type: boolean
+        default: true
+      build_windows:
+        description: 'Build Windows'
+        type: boolean
+        default: true
+      build_android:
+        description: 'Build Android'
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-linux:
+    if: ${{ github.event_name == 'push' || inputs.build_linux == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev libjsoncpp-dev
+      - run: flutter pub get
+      - run: flutter build linux --release --build-name=${{ inputs.version || github.ref_name }} --build-number=${{ inputs.build_number || github.run_number }} --dart-define=GITHUB_CLIENT_ID=${{ secrets.OAUTH_CLIENT_ID }}
+      - name: Archive Linux build
+        run: |
+          cd build/linux/x64/release/bundle
+          tar -czvf ../../../../../vaultnote-linux.tar.gz *
+      - name: Create AppImage
+        run: |
+          # Download AppImage tools
+          wget -O linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          
+          # Create AppDir structure
+          mkdir -p VaultNote.AppDir/usr/bin
+          mkdir -p VaultNote.AppDir/usr/share/applications
+          mkdir -p VaultNote.AppDir/usr/share/icons/hicolor/256x256/apps
+          
+          # Copy application files
+          cp -r build/linux/x64/release/bundle/* VaultNote.AppDir/usr/bin/
+          
+          # Create desktop file
+          cat > VaultNote.AppDir/usr/share/applications/vaultnote.desktop << EOF
+          [Desktop Entry]
+          Type=Application
+          Name=VaultNote
+          Comment=Encrypted markdown notes with GitHub sync
+          Exec=vaultnote
+          Icon=vaultnote
+          Categories=Office;TextEditor;
+          EOF
+          
+          # Copy icon (convert PNG to proper location)
+          cp assets/icon.png VaultNote.AppDir/usr/share/icons/hicolor/256x256/apps/vaultnote.png
+          cp assets/icon.png VaultNote.AppDir/vaultnote.png
+          
+          # Create AppRun
+          cat > VaultNote.AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          exec "${HERE}/usr/bin/vaultnote" "$@"
+          EOF
+          chmod +x VaultNote.AppDir/AppRun
+          
+          # Build AppImage
+          ./linuxdeploy --appdir VaultNote.AppDir --output appimage
+          
+          # Rename to proper name
+          mv VaultNote-*.AppImage vaultnote-linux.AppImage
+      - name: Create DEB package
+        run: |
+          # Create DEB package structure
+          mkdir -p vaultnote-deb/DEBIAN
+          mkdir -p vaultnote-deb/usr/bin
+          mkdir -p vaultnote-deb/usr/share/applications
+          mkdir -p vaultnote-deb/usr/share/icons/hicolor/256x256/apps
+          mkdir -p vaultnote-deb/usr/share/doc/vaultnote
+          
+          # Copy application files
+          cp -r build/linux/x64/release/bundle/* vaultnote-deb/usr/bin/
+          
+          # Strip 'v' prefix from version for DEB
+          DEB_VERSION=${{ inputs.version || github.ref_name }}
+          DEB_VERSION=${DEB_VERSION#v}
+          
+          # Create control file
+          cat > vaultnote-deb/DEBIAN/control << EOF
+          Package: vaultnote
+          Version: $DEB_VERSION
+          Section: editors
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-3-0, libglib2.0-0, libsecret-1-0
+          Maintainer: Paresh Maheshwari (https://github.com/Paresh-Maheshwari)
+          Description: Encrypted markdown notes with GitHub sync
+           Cross-platform encrypted notes application with GitHub synchronization.
+           Features AES-256 encryption, biometric authentication, rich text editing,
+           and seamless multi-device sync.
+          EOF
+          
+          # Create desktop file
+          cat > vaultnote-deb/usr/share/applications/vaultnote.desktop << EOF
+          [Desktop Entry]
+          Type=Application
+          Name=VaultNote
+          Comment=Encrypted markdown notes with GitHub sync
+          Exec=vaultnote
+          Icon=vaultnote
+          Categories=Office;TextEditor;
+          StartupWMClass=vaultnote
+          EOF
+          
+          # Copy icon
+          cp assets/icon.png vaultnote-deb/usr/share/icons/hicolor/256x256/apps/vaultnote.png
+          
+          # Create copyright file
+          cat > vaultnote-deb/usr/share/doc/vaultnote/copyright << EOF
+          Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+          Upstream-Name: VaultNote
+          Source: https://github.com/Paresh-Maheshwari/VaultNote
+          
+          Files: *
+          Copyright: 2026 Paresh Maheshwari
+          License: AGPL-3.0+
+          EOF
+          
+          # Set permissions
+          chmod 755 vaultnote-deb/usr/bin/vaultnote
+          chmod 644 vaultnote-deb/usr/share/applications/vaultnote.desktop
+          chmod 644 vaultnote-deb/usr/share/icons/hicolor/256x256/apps/vaultnote.png
+          
+          # Build DEB package
+          dpkg-deb --build vaultnote-deb vaultnote_${{ inputs.version || github.ref_name }}_amd64.deb
+      - name: Create RPM package
+        run: |
+          # Install RPM build tools
+          sudo apt-get update && sudo apt-get install -y rpm
+          
+          # Create RPM build structure
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          
+          # Create source tarball
+          mkdir -p vaultnote-${{ inputs.version || github.ref_name }}
+          cp -r build/linux/x64/release/bundle/* vaultnote-${{ inputs.version || github.ref_name }}/
+          cp assets/icon.png vaultnote-${{ inputs.version || github.ref_name }}/
+          tar -czf ~/rpmbuild/SOURCES/vaultnote-${{ inputs.version || github.ref_name }}.tar.gz vaultnote-${{ inputs.version || github.ref_name }}
+          
+          # Create RPM spec file
+          cat > ~/rpmbuild/SPECS/vaultnote.spec << EOF
+          Name:           vaultnote
+          Version:        ${{ inputs.version || github.ref_name }}
+          Release:        1%{?dist}
+          Summary:        Encrypted markdown notes with GitHub sync
+          License:        AGPL-3.0+
+          URL:            https://github.com/Paresh-Maheshwari/VaultNote
+          Source0:        %{name}-%{version}.tar.gz
+          
+          Requires:       gtk3, glib2, libsecret
+          
+          %description
+          Cross-platform encrypted notes application with GitHub synchronization.
+          Features AES-256 encryption, biometric authentication, rich text editing,
+          and seamless multi-device sync.
+          
+          %prep
+          %setup -q
+          
+          %install
+          mkdir -p %{buildroot}%{_bindir}
+          mkdir -p %{buildroot}%{_datadir}/applications
+          mkdir -p %{buildroot}%{_datadir}/icons/hicolor/256x256/apps
+          
+          # Install main executable
+          cp vaultnote %{buildroot}%{_bindir}/
+          
+          # Install other files (excluding icon which we handle separately)
+          find . -type f ! -name "vaultnote" ! -name "icon.png" -exec cp {} %{buildroot}%{_bindir}/ \;
+          
+          # Create desktop file
+          cat > %{buildroot}%{_datadir}/applications/vaultnote.desktop << 'DESKTOP_EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=VaultNote
+          Comment=Encrypted markdown notes with GitHub sync
+          Exec=vaultnote
+          Icon=vaultnote
+          Categories=Office;TextEditor;
+          StartupWMClass=vaultnote
+          DESKTOP_EOF
+          
+          # Install icon
+          cp icon.png %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/vaultnote.png
+          
+          %files
+          %{_bindir}/vaultnote
+          %{_bindir}/*
+          %{_datadir}/applications/vaultnote.desktop
+          %{_datadir}/icons/hicolor/256x256/apps/vaultnote.png
+          
+          %changelog
+          * Sat Jan 17 2026 Paresh Maheshwari - ${{ inputs.version || github.ref_name }}-1
+          - Initial RPM release
+          EOF
+          
+          # Build RPM (without debug package to avoid issues on Ubuntu)
+          rpmbuild -bb --define "debug_package %{nil}" ~/rpmbuild/SPECS/vaultnote.spec
+          
+          # Copy RPM to current directory
+          cp ~/rpmbuild/RPMS/x86_64/vaultnote-${{ inputs.version || github.ref_name }}-1.*.rpm ./vaultnote-${{ inputs.version || github.ref_name }}-1.x86_64.rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            vaultnote-linux.tar.gz
+            vaultnote-linux.AppImage
+            vaultnote_*_amd64.deb
+            vaultnote-*-1.x86_64.rpm
+
+  build-windows:
+    if: ${{ github.event_name == 'push' || inputs.build_windows == true }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - run: flutter pub get
+      - run: flutter build windows --release --build-name=${{ inputs.version || github.ref_name }} --build-number=${{ inputs.build_number || github.run_number }} --dart-define=GITHUB_CLIENT_ID=${{ secrets.OAUTH_CLIENT_ID }}
+      - name: Archive Windows build
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath vaultnote-windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: vaultnote-windows.zip
+      - name: Install WiX Toolset
+        run: |
+          choco install wixtoolset -y
+          refreshenv
+        continue-on-error: true
+      - name: Create MSI Installer
+        run: |
+          # Generate LICENSE.rtf for installer
+          echo '{\rtf1\ansi\deff0 {\fonttbl {\f0 Times New Roman;}}' > LICENSE.rtf
+          echo '\f0\fs20' >> LICENSE.rtf
+          echo 'GNU AFFERO GENERAL PUBLIC LICENSE\par' >> LICENSE.rtf
+          echo 'Version 3, 19 November 2007\par' >> LICENSE.rtf
+          echo '\par' >> LICENSE.rtf
+          echo 'This program is free software under AGPL-3.0 with Commons Clause.\par' >> LICENSE.rtf
+          echo 'You cannot sell this software as a service or product.\par' >> LICENSE.rtf
+          echo '\par' >> LICENSE.rtf
+          echo 'For more information: https://github.com/Paresh-Maheshwari/VaultNote\par' >> LICENSE.rtf
+          echo '}' >> LICENSE.rtf
+          
+          $env:PATH += ";C:\Program Files (x86)\WiX Toolset v3.14\bin;C:\Program Files (x86)\WiX Toolset v3.11\bin"
+          # Harvest all files from Release directory
+          heat dir "build\windows\x64\runner\Release" -cg ProductComponents -dr INSTALLFOLDER -srd -ag -sfrag -var var.SourceDir -out files.wxs
+          # Compile
+          candle installer.wxs files.wxs -dSourceDir="build\windows\x64\runner\Release" -out obj\ -ext WixUtilExtension
+          # Link
+          light obj\installer.wixobj obj\files.wixobj -out vaultnote-installer.msi -ext WixUIExtension -ext WixUtilExtension -b "build\windows\x64\runner\Release"
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with:
+          name: windows-msi
+          path: vaultnote-installer.msi
+        continue-on-error: true
+
+  build-android:
+    if: ${{ github.event_name == 'push' || inputs.build_android == true }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      - name: Setup signing
+        run: |
+          mkdir -p android/keystore
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/keystore/vaultnote-release.jks
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=vaultnote" >> android/key.properties
+          echo "storeFile=../keystore/vaultnote-release.jks" >> android/key.properties
+      - run: flutter pub get
+      - run: flutter build apk --release --build-name=${{ inputs.version || github.ref_name }} --build-number=${{ inputs.build_number || github.run_number }} --dart-define=GITHUB_CLIENT_ID=${{ secrets.OAUTH_CLIENT_ID }} --split-per-abi
+      - name: Archive Android builds
+        run: |
+          mkdir -p android-builds
+          echo "Generated APK files:"
+          find build/app/outputs/flutter-apk/ -name "*.apk" -type f
+          # Rename APKs with proper VaultNote naming
+          for apk in build/app/outputs/flutter-apk/*.apk; do
+            if [[ -f "$apk" ]]; then
+              filename=$(basename "$apk")
+              # Replace app- with vaultnote-
+              newname=${filename/app-/vaultnote-}
+              cp "$apk" "android-builds/$newname"
+              echo "Copied: $filename -> $newname"
+            fi
+          done
+          echo "Final android-builds directory:"
+          ls -la android-builds/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-builds
+          path: android-builds/
+
+  release:
+    needs: [build-linux, build-windows, build-android]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: List all artifacts
+        run: |
+          echo "Available build artifacts:"
+          find . -name "*.apk" -o -name "*.tar.gz" -o -name "*.zip" -o -name "*.msi" | sort
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          cp linux-build/vaultnote-linux.tar.gz release-files/ 2>/dev/null || true
+          cp linux-build/vaultnote-linux.AppImage release-files/ 2>/dev/null || true
+          cp linux-build/vaultnote_*_amd64.deb release-files/ 2>/dev/null || true
+          cp linux-build/vaultnote-*-1.x86_64.rpm release-files/ 2>/dev/null || true
+          cp windows-build/vaultnote-windows.zip release-files/ 2>/dev/null || true
+          cp windows-msi/vaultnote-installer.msi release-files/ 2>/dev/null || true
+          cp android-builds/*.apk release-files/ 2>/dev/null || true
+          ls -la release-files/
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-files/*
+          body: |
+            ## VaultNote v${{ github.ref_name }}
+            
+            ### Downloads
+            - **Android**: Multiple APKs for different architectures
+            - **Windows**: ZIP archive + MSI installer
+            - **Linux**: TAR.GZ archive + AppImage (portable) + DEB package + RPM package
+            
+            ### Build Info
+            - Version: ${{ github.ref_name }}
+            - Built from: ${{ github.sha }}
+            - Build date: ${{ github.run_id }}

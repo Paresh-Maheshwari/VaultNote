@@ -1,0 +1,30 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.env
+*.keystore
+*.jks
+key.properties
+android/keystore/
+vaultnote-release.jks
+
+# Generated
+*.g.dart
+*.freezed.dart
+pubspec.lock
