@@ -1,0 +1,19 @@
+VaultNote is an encrypted note-taking application that prioritizes user privacy and data ownership.
+
+Key features:
+• AES-256 encryption for all notes before any synchronization
+• GitHub repository integration for backup and multi-device sync
+• Rich WYSIWYG and Markdown editing modes
+• Biometric authentication (fingerprint/face unlock)
+• Local-first approach - notes stored on device, encrypted before upload
+• Cross-platform compatibility (Android, Linux, Windows)
+
+The app ensures users maintain complete control over their data by storing encrypted notes in their own private GitHub repositories, eliminating dependence on third-party cloud services.
+
+Privacy Features:
+• Master password never stored - HMAC validation only
+• Session-based security - password cleared on exit
+• No telemetry or analytics
+• Open source code for transparency
+
+Perfect for users who want secure note-taking without trusting cloud providers with their sensitive information.

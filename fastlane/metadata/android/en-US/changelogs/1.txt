@@ -1,0 +1,11 @@
+Initial release of VaultNote v1.0.0
+
+Features:
+• AES-256 encrypted note storage
+• GitHub repository synchronization
+• Rich text and Markdown editing
+• Biometric authentication support
+• Cross-platform compatibility
+• Open source under AGPL-3.0 license
+
+This is the first stable release with full encryption and sync capabilities.
