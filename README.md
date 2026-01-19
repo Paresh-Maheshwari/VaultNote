@@ -198,6 +198,16 @@ flutter run -d linux
 dart analyze lib/
 ```
 
+## Code Signing Policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)
+
+**Team roles:**
+- Committers and reviewers: [Paresh-Maheshwari](https://github.com/Paresh-Maheshwari)
+- Approvers: [Paresh-Maheshwari](https://github.com/Paresh-Maheshwari)
+
+**Privacy policy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
+
 ## Support
 
 If you find VaultNote helpful:
