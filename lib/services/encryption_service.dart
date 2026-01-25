@@ -94,7 +94,7 @@ class EncryptionService {
       String data = encryptedText;
       
       // Remove ENC: prefix if present
-      if (data.startsWith('ENC:')) {
+      if (data.startsWith('ENC:') && data.length > 4) {
         data = data.substring(4);
       }
       
@@ -117,7 +117,7 @@ class EncryptionService {
   static bool isEncrypted(String text) {
     if (text.isEmpty) return false;
     
-    if (text.startsWith('ENC:')) {
+    if (text.startsWith('ENC:') && text.length > 4) {
       final parts = text.substring(4).split(':');
       if (parts.length != 3) return false;
       try {
@@ -301,13 +301,14 @@ class EncryptionService {
   /// Encrypt content for password-protected gist sharing
   static String encryptForProtectedGist(String content, String password) {
     final encrypted = encrypt(content, password);
+    if (encrypted.length <= 4) return encrypted;
     return '$_pencPrefix${encrypted.substring(4)}'; // Replace ENC: with PENC:
   }
 
   /// Decrypt password-protected gist content
   static String? decryptProtectedGist(String content, String password) {
     final pencData = _extractPencData(content);
-    if (pencData == null) return null;
+    if (pencData == null || pencData.length <= 5) return null;
     // Convert PENC: to ENC: for decryption
     final encData = 'ENC:${pencData.substring(5)}';
     return decrypt(encData, password);

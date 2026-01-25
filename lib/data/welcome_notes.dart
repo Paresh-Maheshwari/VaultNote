@@ -12,19 +12,29 @@
 // 4. Share as Gist - Public/secret/protected gists
 // 5. Security & Encryption - Master password, biometric
 // 6. Themes & Editor - Appearance settings
+// 7. New Features - Bookmarks and scratchpad
 //
 // ============================================================================
 
 import '../models/note.dart';
 
 class WelcomeNotes {
+  // Fixed timestamp IDs (Jan 1, 2000 00:00:00 UTC) to prevent duplicate creation
+  static const welcomeId = '946684800001';
+  static const editorId = '946684800002';
+  static const githubId = '946684800003';
+  static const gistId = '946684800004';
+  static const securityId = '946684800005';
+  static const themeId = '946684800006';
+  static const featuresId = '946684800007';
+
   static List<Note> createWelcomeNotes() {
     final now = DateTime.now();
     
     return [
       // Main welcome note
       Note(
-        id: '${now.millisecondsSinceEpoch}001',
+        id: welcomeId,
         title: '🎉 Welcome to VaultNote!',
         content: '''Your notes are **encrypted** and can sync securely to **GitHub**.
 
@@ -57,7 +67,7 @@ class WelcomeNotes {
 
       // Markdown guide
       Note(
-        id: '${now.millisecondsSinceEpoch}002',
+        id: editorId,
         title: '📝 Editor & Formatting',
         content: '''Learn how to format your notes with Markdown!
 
@@ -103,7 +113,7 @@ Type `/` then search:
 
       // GitHub sync guide
       Note(
-        id: '${now.millisecondsSinceEpoch}003',
+        id: githubId,
         title: '☁️ GitHub Sync Setup',
         content: '''## Why Sync?
 - **Backup** - Never lose your notes
@@ -134,7 +144,7 @@ Type `/` then search:
 
       // Gists guide
       Note(
-        id: '${now.millisecondsSinceEpoch}004',
+        id: gistId,
         title: '🔗 Share as Gist',
         content: '''Share any note as a GitHub Gist!
 
@@ -167,7 +177,7 @@ Type `/` then search:
 
       // Security guide
       Note(
-        id: '${now.millisecondsSinceEpoch}005',
+        id: securityId,
         title: '🔒 Security & Encryption',
         content: '''Keep your notes protected!
 
@@ -202,7 +212,7 @@ Type `/` then search:
 
       // Theme & customization guide
       Note(
-        id: '${now.millisecondsSinceEpoch}006',
+        id: themeId,
         title: '🎨 Themes & Editor',
         content: '''Customize your experience!
 
@@ -232,6 +242,52 @@ Type `/` then search:
         folder: 'Guide',
         createdAt: now.subtract(const Duration(minutes: 5)),
         updatedAt: now.subtract(const Duration(minutes: 5)),
+      ),
+
+      // New features guide
+      Note(
+        id: featuresId,
+        title: '🔖 Bookmarks & Scratchpad',
+        content: '''Discover VaultNote's powerful new features!
+
+## 📚 Bookmarks
+Save and organize web pages with full sync support.
+
+### Features
+- **Browser Extension** - Chrome/Firefox/Edge support
+- **Auto-metadata** - Fetches titles, descriptions, favicons
+- **Folder Organization** - Organize with nested folders
+- **GitHub Sync** - Bookmarks sync across all devices
+- **Import/Export** - JSON and HTML formats
+- **Mobile Sharing** - Save from other apps
+
+### Access
+- Tap **Bookmarks** tab in navigation
+- Install browser extension for one-click saving
+- Settings → Extension Server for configuration
+
+## 📝 Scratchpad
+Quick note-taking with unlimited tabs.
+
+### Features
+- **Unlimited Tabs** - Create as many as needed
+- **Color Coding** - 8 colors for organization
+- **Editable Names** - Rename tabs (15 char limit)
+- **Auto-save** - Content saved automatically
+- **Export to Notes** - Convert to permanent notes
+- **Character Count** - Live count per tab
+
+### Access
+- **Ctrl+Q** - Open scratchpad (global shortcut)
+- **Ctrl+N** - New tab (in scratchpad)
+- **Ctrl+W** - Close tab (in scratchpad)
+
+---
+*Both features sync to GitHub automatically!*''',
+        tags: ['guide', 'new'],
+        folder: 'Guide',
+        createdAt: now.subtract(const Duration(minutes: 6)),
+        updatedAt: now.subtract(const Duration(minutes: 6)),
       ),
     ];
   }

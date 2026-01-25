@@ -15,15 +15,16 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import '../providers/notes_provider.dart';
 import '../providers/theme_provider.dart';
+import '../providers/bookmarks_provider.dart';
 import '../services/encryption_service.dart';
 import '../services/biometric_service.dart';
 import '../models/note.dart';
@@ -54,10 +55,7 @@ class SettingsScreen extends StatelessWidget {
     final isDesktop = MediaQuery.of(context).size.width >= 600;
     
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        centerTitle: false,
-      ),
+      appBar: isDesktop ? AppBar(title: const Text('Settings')) : null,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -130,27 +128,41 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 16),
           
           // Data Section
-          _buildSectionCard(
-            context,
-            icon: Icons.storage_outlined,
-            title: 'Data',
-            children: [
-              _buildSettingTile(
-                icon: Icons.file_download_outlined,
-                title: 'Export Notes',
-                subtitle: 'Save all notes as JSON',
-                onTap: () => _exportNotes(context),
-              ),
-              const Divider(height: 1),
-              _buildSettingTile(
-                icon: Icons.file_upload_outlined,
-                title: 'Import Notes',
-                subtitle: 'Load notes from JSON file',
-                onTap: () => _importNotes(context),
-              ),
-            ],
+          Consumer<BookmarksProvider>(
+            builder: (context, bookmarksProvider, _) => _buildSectionCard(
+              context,
+              icon: Icons.storage_outlined,
+              title: 'Data',
+              children: [
+                _buildSettingTile(
+                  icon: Icons.bookmark_outline,
+                  title: 'Total Bookmarks',
+                  subtitle: '${bookmarksProvider.count} bookmarks stored',
+                ),
+                const Divider(height: 1),
+                _buildSettingTile(
+                  icon: Icons.file_download_outlined,
+                  title: 'Export Notes',
+                  subtitle: 'Save all notes as JSON',
+                  onTap: () => _exportNotes(context),
+                ),
+                const Divider(height: 1),
+                _buildSettingTile(
+                  icon: Icons.file_upload_outlined,
+                  title: 'Import Notes',
+                  subtitle: 'Load notes from JSON file',
+                  onTap: () => _importNotes(context),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
+          
+          // Browser Extension Section (desktop only)
+          if (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+            _buildExtensionSection(context),
+          if (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+            const SizedBox(height: 16),
           
           // Shortcuts Section (desktop only)
           if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) ...[
@@ -507,6 +519,209 @@ class SettingsScreen extends StatelessWidget {
             onPressed: () { provider.disconnectGitHub(); Navigator.pop(ctx); },
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Disconnect'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExtensionSection(BuildContext context) {
+    return Consumer<BookmarksProvider>(
+      builder: (context, provider, _) => _buildSectionCard(
+        context,
+        icon: Icons.extension_outlined,
+        title: 'Browser Extension',
+        children: [
+          SwitchListTile(
+            secondary: Icon(provider.extensionServerEnabled ? Icons.power : Icons.power_off),
+            title: const Text('Enable Extension Server'),
+            subtitle: Text(provider.isServerRunning 
+                ? 'Running on ${provider.extensionServerHost}:${provider.extensionServerPort}' 
+                : 'Server stopped'),
+            value: provider.extensionServerEnabled,
+            onChanged: (v) => provider.setExtensionServerEnabled(v),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.dns_outlined),
+            title: const Text('Server Host'),
+            subtitle: Text(provider.extensionServerHost == '0.0.0.0' 
+                ? 'All interfaces (network accessible)' 
+                : 'Localhost only'),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: provider.extensionServerEnabled,
+            onTap: provider.extensionServerEnabled 
+                ? () => _showHostDialog(context, provider) 
+                : null,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.numbers),
+            title: const Text('Server Port'),
+            subtitle: Text('Current: ${provider.extensionServerPort}'),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: provider.extensionServerEnabled,
+            onTap: provider.extensionServerEnabled 
+                ? () => _showPortDialog(context, provider) 
+                : null,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: Icon(provider.extensionApiKey != null ? Icons.lock : Icons.lock_open),
+            title: const Text('API Key Authentication'),
+            subtitle: Text(provider.extensionApiKey != null ? 'Enabled' : 'Disabled (open access)'),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: provider.extensionServerEnabled,
+            onTap: provider.extensionServerEnabled 
+                ? () => _showApiKeyDialog(context, provider) 
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showApiKeyDialog(BuildContext context, BookmarksProvider provider) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('API Key Authentication'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (provider.extensionApiKey != null) ...[
+                const Text('Current API Key:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SelectableText(
+                          provider.extensionApiKey ?? 'No API key set',
+                          style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.copy, size: 18),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: provider.extensionApiKey!));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('API key copied'), duration: Duration(seconds: 1)),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text('Copy this key to your browser extension settings.', 
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ] else
+                const Text('Enable API key to require authentication for extension sync.'),
+            ],
+          ),
+          actions: [
+            if (provider.extensionApiKey != null) ...[
+              TextButton(
+                onPressed: () {
+                  provider.setExtensionApiKey(null);
+                  Navigator.pop(ctx);
+                },
+                child: const Text('Disable'),
+              ),
+              TextButton(
+                onPressed: () {
+                  provider.setExtensionApiKey(provider.generateApiKey());
+                  setState(() {});
+                },
+                child: const Text('Regenerate'),
+              ),
+            ] else
+              FilledButton(
+                onPressed: () {
+                  provider.setExtensionApiKey(provider.generateApiKey());
+                  setState(() {});
+                },
+                child: const Text('Enable & Generate Key'),
+              ),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showHostDialog(BuildContext context, BookmarksProvider provider) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Server Host'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(provider.extensionServerHost == '127.0.0.1' ? Icons.radio_button_checked : Icons.radio_button_off, color: Theme.of(context).primaryColor),
+              title: const Text('Localhost only'),
+              subtitle: const Text('127.0.0.1 - Same device only'),
+              onTap: () {
+                provider.setExtensionServerHost('127.0.0.1');
+                Navigator.pop(ctx);
+              },
+            ),
+            ListTile(
+              leading: Icon(provider.extensionServerHost == '0.0.0.0' ? Icons.radio_button_checked : Icons.radio_button_off, color: Theme.of(context).primaryColor),
+              title: const Text('All interfaces'),
+              subtitle: const Text('0.0.0.0 - Network accessible'),
+              onTap: () {
+                provider.setExtensionServerHost('0.0.0.0');
+                Navigator.pop(ctx);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ],
+      ),
+    );
+  }
+
+  void _showPortDialog(BuildContext context, BookmarksProvider provider) {
+    final controller = TextEditingController(text: provider.extensionServerPort.toString());
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Server Port'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Port number',
+            hintText: '52525',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final port = int.tryParse(controller.text);
+              if (port != null && port > 1024 && port < 65536) {
+                provider.setExtensionServerPort(port);
+                Navigator.pop(ctx);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Invalid port (1025-65535)')),
+                );
+              }
+            },
+            child: const Text('Save'),
           ),
         ],
       ),
@@ -1338,7 +1553,10 @@ class _EncryptionSectionState extends State<_EncryptionSection> {
       if (clear == true) {
         // Clean orphan commit - history truly cleared
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Clearing GitHub history...')));
-        await provider.clearGitHubAndReupload();
+        if (!mounted) return;
+        final bookmarksProvider = Provider.of<BookmarksProvider>(context, listen: false);
+        await provider.clearGitHubAndReupload(bookmarks: bookmarksProvider.bookmarks);
+        await bookmarksProvider.markAllSynced();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('GitHub history cleared and notes re-uploaded ✓'))
@@ -1395,7 +1613,12 @@ void _showClearDatabaseDialog(BuildContext context, NotesProvider provider) {
 
 Future<void> _clearLocalDatabase(NotesProvider provider, BuildContext context) async {
   try {
+    // Also clear bookmarks from memory
+    final bookmarksProvider = Provider.of<BookmarksProvider>(context, listen: false);
+    
     await provider.clearAllLocalData();
+    bookmarksProvider.clearAllBookmarks();
+    
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Local database cleared successfully')),

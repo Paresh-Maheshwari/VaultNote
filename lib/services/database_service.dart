@@ -2,10 +2,11 @@
 // DATABASE SERVICE
 // ============================================================================
 //
-// SQLite database for local note storage.
+// SQLite database for local note and bookmark storage.
 // 
 // Tables:
 // - notes: All note data (id, title, content, tags, folder, gist info, etc.)
+// - bookmarks: All bookmark data (id, url, title, description, folder, etc.)
 // - encryption_versions: Tracks encryption state for sync
 //
 // Database location: {app_support_dir}/databases/notes.db
@@ -39,8 +40,9 @@ class DatabaseService {
     DebugService.log('DB', 'Opening database: $path');
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDatabase,
+      onUpgrade: _upgradeDatabase,
     );
   }
 
@@ -65,6 +67,22 @@ class DatabaseService {
       )
     ''');
     
+    await db.execute('''
+      CREATE TABLE bookmarks (
+        id TEXT PRIMARY KEY,
+        url TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        image TEXT,
+        notes TEXT,
+        favicon TEXT,
+        folder TEXT DEFAULT 'Bookmarks',
+        tags TEXT,
+        createdAt TEXT NOT NULL,
+        isSynced INTEGER DEFAULT 0
+      )
+    ''');
+    
     // Encryption version tracking table
     await db.execute('''
       CREATE TABLE encryption_versions (
@@ -77,6 +95,43 @@ class DatabaseService {
         repo_key TEXT NOT NULL UNIQUE
       )
     ''');
+  }
+
+  /// Handle database upgrades
+  Future<void> _upgradeDatabase(Database db, int oldVersion, int newVersion) async {
+    DebugService.log('DB', 'Upgrading database from v$oldVersion to v$newVersion');
+    
+    try {
+      if (oldVersion < 2) {
+        // Add bookmarks table in version 2
+        await db.execute('''
+          CREATE TABLE bookmarks (
+            id TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            image TEXT,
+            notes TEXT,
+            favicon TEXT,
+            folder TEXT DEFAULT 'Bookmarks',
+            tags TEXT,
+            createdAt TEXT NOT NULL,
+            isSynced INTEGER DEFAULT 0
+          )
+        ''');
+        DebugService.log('DB', 'Added bookmarks table in database upgrade');
+      }
+      
+      // Handle future versions
+      if (oldVersion < 3) {
+        // Future migration logic goes here
+        DebugService.log('DB', 'Database already at latest version');
+      }
+      
+    } catch (e) {
+      DebugService.log('DB', 'Database upgrade failed: $e', isError: true);
+      throw Exception('Database upgrade failed: $e');
+    }
   }
 
   // === Note Operations ===

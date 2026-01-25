@@ -28,6 +28,7 @@ import 'dart:io' show Platform;
 import 'dart:async';
 import 'providers/notes_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/bookmarks_provider.dart';
 import 'screens/notes_list_screen.dart';
 import 'screens/lock_screen.dart';
 import 'services/encryption_service.dart';
@@ -110,50 +111,63 @@ class _NotesAppState extends State<NotesApp> {
       providers: [
         ChangeNotifierProvider(create: (_) => NotesProvider()..init()),
         ChangeNotifierProvider(create: (_) => ThemeProvider(widget.prefs)),
+        ChangeNotifierProvider(create: (_) => BookmarksProvider()..init()),
       ],
-      child: Consumer<ThemeProvider>(
-        builder: (context, themeProvider, _) => MaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'Vaultnote',
-          localizationsDelegates: const [AppFlowyEditorLocalizations.delegate],
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.blue,
-              brightness: Brightness.light,
-              surface: const Color(0xFFF5F5F5),
-              surfaceContainerHighest: const Color(0xFFE8E8E8),
-              outline: const Color(0xFFBBBBBB),
-              outlineVariant: const Color(0xFFD0D0D0),
+      child: Consumer2<ThemeProvider, NotesProvider>(
+        builder: (context, themeProvider, notesProvider, _) {
+          // Initialize GitHub for bookmarks when auth is available and configured
+          if (notesProvider.authService != null && notesProvider.isGitHubConfigured) {
+            final bookmarks = Provider.of<BookmarksProvider>(context, listen: false);
+            // Use post frame callback to avoid calling during build
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                bookmarks.initGitHub(notesProvider.authService!);
+              }
+            });
+          }
+          return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            title: 'Vaultnote',
+            localizationsDelegates: const [AppFlowyEditorLocalizations.delegate],
+            theme: ThemeData(
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: Colors.blue,
+                brightness: Brightness.light,
+                surface: const Color(0xFFF5F5F5),
+                surfaceContainerHighest: const Color(0xFFE8E8E8),
+                outline: const Color(0xFFBBBBBB),
+                outlineVariant: const Color(0xFFD0D0D0),
+              ),
+              useMaterial3: true,
+              scaffoldBackgroundColor: const Color(0xFFF5F5F5),
+              appBarTheme: const AppBarTheme(
+                backgroundColor: Color(0xFFF5F5F5),
+                scrolledUnderElevation: 0,
+                surfaceTintColor: Colors.transparent,
+              ),
+              cardTheme: const CardThemeData(
+                color: Colors.white,
+              ),
+              dividerTheme: const DividerThemeData(
+                color: Color(0xFFD0D0D0),
+              ),
             ),
-            useMaterial3: true,
-            scaffoldBackgroundColor: const Color(0xFFF5F5F5),
-            appBarTheme: const AppBarTheme(
-              backgroundColor: Color(0xFFF5F5F5),
-              scrolledUnderElevation: 0,
-              surfaceTintColor: Colors.transparent,
+            darkTheme: ThemeData(
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: Colors.blue,
+                brightness: Brightness.dark,
+              ),
+              useMaterial3: true,
+              appBarTheme: AppBarTheme(
+                scrolledUnderElevation: 0,
+                surfaceTintColor: Colors.transparent,
+                backgroundColor: ColorScheme.fromSeed(seedColor: Colors.blue, brightness: Brightness.dark).surface,
+              ),
             ),
-            cardTheme: const CardThemeData(
-              color: Colors.white,
-            ),
-            dividerTheme: const DividerThemeData(
-              color: Color(0xFFD0D0D0),
-            ),
-          ),
-          darkTheme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: Colors.blue,
-              brightness: Brightness.dark,
-            ),
-            useMaterial3: true,
-            appBarTheme: AppBarTheme(
-              scrolledUnderElevation: 0,
-              surfaceTintColor: Colors.transparent,
-              backgroundColor: ColorScheme.fromSeed(seedColor: Colors.blue, brightness: Brightness.dark).surface,
-            ),
-          ),
-          themeMode: themeProvider.themeMode,
-          home: _locked ? LockScreen(onUnlocked: _unlock) : const NotesListScreen(),
-        ),
+            themeMode: themeProvider.themeMode,
+            home: _locked ? LockScreen(onUnlocked: _unlock) : const NotesListScreen(),
+          );
+        },
       ),
     );
   }

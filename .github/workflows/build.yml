@@ -328,8 +328,29 @@ jobs:
           name: android-builds
           path: android-builds/
 
+  build-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package Browser Extension
+        run: |
+          # Create extension package
+          mkdir -p extension-build
+          cd browser-extension
+          
+          # Create ZIP for Chrome/Edge/Firefox
+          zip -r ../extension-build/vaultnote-browser-extension.zip . -x "*.md" "*.txt"
+          
+          # Verify contents
+          echo "Extension package contents:"
+          unzip -l ../extension-build/vaultnote-browser-extension.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension
+          path: extension-build/vaultnote-browser-extension.zip
+
   release:
-    needs: [build-linux, build-windows, build-android]
+    needs: [build-linux, build-windows, build-android, build-extension]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     permissions:
@@ -350,6 +371,7 @@ jobs:
           cp windows-build/vaultnote-windows.zip release-files/ 2>/dev/null || true
           cp windows-msi/vaultnote-installer.msi release-files/ 2>/dev/null || true
           cp android-builds/*.apk release-files/ 2>/dev/null || true
+          cp browser-extension/vaultnote-browser-extension.zip release-files/ 2>/dev/null || true
           ls -la release-files/
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -363,6 +385,7 @@ jobs:
             - **Android**: Multiple APKs for different architectures
             - **Windows**: ZIP archive + MSI installer
             - **Linux**: TAR.GZ archive + AppImage (portable) + DEB package + RPM package
+            - **Browser Extension**: ZIP file for Chrome/Firefox/Edge
             
             ### Build Info
             - Version: ${{ github.ref_name }}

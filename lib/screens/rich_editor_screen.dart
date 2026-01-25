@@ -523,7 +523,12 @@ class _RichEditorScreenState extends State<RichEditorScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(leading: const Icon(Icons.copy), title: const Text('Copy Link'), onTap: () { Navigator.pop(context); Clipboard.setData(ClipboardData(text: gistUrl)); showAppSnackBar(context, 'Gist link copied'); }),
-            ListTile(leading: const Icon(Icons.open_in_new), title: const Text('Open Gist'), onTap: () async { Navigator.pop(context); if (await canLaunchUrl(Uri.parse(gistUrl))) await launchUrl(Uri.parse(gistUrl), mode: LaunchMode.externalApplication); }),
+            ListTile(leading: const Icon(Icons.open_in_new), title: const Text('Open Gist'), onTap: () async { 
+              Navigator.pop(context); 
+              if (mounted && await canLaunchUrl(Uri.parse(gistUrl))) {
+                await launchUrl(Uri.parse(gistUrl), mode: LaunchMode.externalApplication);
+              }
+            }),
             if (isProtected)
               ListTile(leading: Icon(Icons.refresh, color: colors.primary), title: Text('Re-share with New Password', style: TextStyle(color: colors.primary)), subtitle: const Text('Delete current and create new gist'), onTap: () { Navigator.pop(context); _reshareProtectedGist(); }),
             ListTile(leading: Icon(Icons.delete_outline, color: colors.error), title: Text('Unshare', style: TextStyle(color: colors.error)), onTap: () { Navigator.pop(context); _confirmUnshare(); }),
@@ -717,7 +722,7 @@ class _RichEditorScreenState extends State<RichEditorScreen> {
                 children: [
                   ..._availableFolders.map((folder) => ListTile(leading: Icon(Icons.folder, size: 20, color: colors.primary), title: Text(folder), onTap: () { setState(() => _folderController.text = folder); Navigator.pop(ctx); })),
                   Divider(height: 1, color: colors.outline.withValues(alpha: 0.2)),
-                  ListTile(leading: Icon(Icons.add_circle_outline, size: 20, color: colors.primary), title: Text('Create New Folder', style: TextStyle(color: colors.primary, fontWeight: FontWeight.w500)), onTap: () async { Navigator.pop(ctx); final name = await _askFolderName(); if (name != null && name.isNotEmpty) setState(() { _folderController.text = name; if (!_availableFolders.contains(name)) _availableFolders.add(name); }); }),
+                  ListTile(leading: Icon(Icons.add_circle_outline, size: 20, color: colors.primary), title: Text('Create New Folder', style: TextStyle(color: colors.primary, fontWeight: FontWeight.w500)), onTap: () async { Navigator.pop(ctx); final name = await _askFolderName(); if (name != null && name.isNotEmpty && mounted) setState(() { _folderController.text = name; if (!_availableFolders.contains(name)) _availableFolders.add(name); }); }),
                 ],
               ),
             ),

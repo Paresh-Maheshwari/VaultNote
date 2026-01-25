@@ -19,6 +19,7 @@
   <a href="#download">Download</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#documentation">Docs</a> •
+  <a href="CHANGELOG.md">Changelog</a> •
   <a href="#contributing">Contributing</a>
 </p>
 
@@ -34,9 +35,19 @@
 
 - **Rich WYSIWYG Editor** - AppFlowy-powered editor with slash commands
 - **Markdown Editor** - Full markdown support with live preview
+- **Dynamic Scratchpad** - Multi-tab scratchpad with color coding, persistent storage, and export to notes
 - **Syntax Highlighting** - Code blocks with language detection
 - **Focus Mode** - Distraction-free writing
-- **Keyboard Shortcuts** - Ctrl+S save, Ctrl+P preview, Ctrl+N new note
+- **Keyboard Shortcuts** - Ctrl+S save, Ctrl+P preview, Ctrl+N new note, Ctrl+Q scratchpad
+
+### Bookmark Management
+
+- **Browser Extension** - Chrome/Firefox/Edge extension for one-click bookmark saving
+- **Metadata Extraction** - Auto-fetch titles, descriptions, and favicons
+- **Folder Organization** - Organize bookmarks with color-coded folders
+- **GitHub Sync** - Bookmarks sync across devices via GitHub
+- **Import/Export** - JSON and HTML bookmark formats
+- **Mobile Sharing** - Save bookmarks from other apps via Android share intent
 
 ### Security
 
@@ -44,23 +55,24 @@
 - **Master Password** - HMAC-based validation (password never stored)
 - **Biometric Unlock** - Fingerprint/Face unlock support
 - **Session-based** - Password in memory only, cleared on exit
-- **Your Data, Your Repo** - Notes stored in YOUR private GitHub repository
+- **API Key Authentication** - Secure browser extension communication
+- **Your Data, Your Repo** - Notes and bookmarks stored in YOUR private GitHub repository
 
 ### GitHub Sync
 
 - **OAuth Device Flow** - Secure authentication (no PAT needed)
-- **Incremental Sync** - SHA-based change detection
+- **Incremental Sync** - SHA-based change detection for notes and bookmarks
 - **Multi-device** - Sync across all devices with password coordination
 - **Auto Sync** - Configurable interval (2, 5, or 10 minutes)
 - **Branch Selection** - Choose which branch to sync
 
 ### Organization
 
-- **Folders** - Organize notes into folders
-- **Tags** - Multiple tags per note
+- **Folders** - Organize notes and bookmarks into folders
+- **Tags** - Multiple tags per note and bookmark
 - **Star/Favorite** - Quick access to important notes
 - **Pin Notes** - Keep notes at top (swipe right)
-- **Search** - Full-text search across title, content, tags
+- **Search** - Full-text search across title, content, tags, URLs
 - **Sort & Filter** - By date, title, tag, or folder
 
 ### Gist Sharing
@@ -90,6 +102,13 @@ Download from [GitHub Releases](../../releases):
 - **Linux** - Binary
 - **Windows** - Executable
 
+### Browser Extension
+
+Browser extension available in [GitHub Releases](../../releases):
+
+- **Chrome/Edge/Firefox** - Download .zip file and load as unpacked extension
+- **Setup** - Configure API key and VaultNote app connection in extension settings
+
 ### Build from Source
 
 ```bash
@@ -105,7 +124,7 @@ flutter run
 
 ### 1. First Launch
 
-- App creates 6 welcome notes explaining features
+- App creates 7 welcome notes explaining features
 - Delete them when ready
 
 ### 2. Enable Encryption (Recommended)
@@ -120,25 +139,30 @@ flutter run
 - Authorize via device code
 - Select repository and branch
 
-### 4. Start Taking Notes
+### 4. Start Taking Notes & Bookmarks
 
 - Tap + to create note
 - Swipe right to pin
 - Tap ⭐ to favorite
 - Swipe left to delete
+- Use Ctrl+Q for scratchpad
+- Install browser extension for bookmark sync
 
 ---
 
 ## Keyboard Shortcuts
 
-| Shortcut   | Action          |
-| ---------- | --------------- |
-| `Ctrl+N` | New note        |
-| `Ctrl+S` | Save note       |
-| `Ctrl+P` | Toggle preview  |
-| `Ctrl+F` | Focus search    |
-| `Ctrl+R` | Refresh/sync    |
-| `Esc`    | Exit focus mode |
+| Shortcut     | Action                    |
+| ------------ | ------------------------- |
+| `Ctrl+N`     | New note                  |
+| `Ctrl+S`     | Save note                 |
+| `Ctrl+P`     | Toggle preview            |
+| `Ctrl+F`     | Focus search              |
+| `Ctrl+R`     | Refresh/sync              |
+| `Ctrl+Q`     | Open scratchpad           |
+| `Ctrl+N`     | New scratchpad tab        |
+| `Ctrl+W`     | Close scratchpad tab      |
+| `Esc`        | Exit focus mode           |
 
 ---
 
@@ -146,26 +170,33 @@ flutter run
 
 ```
 lib/
-├── main.dart                 # App entry, theme, lock screen
+├── main.dart                     # App entry, theme, lock screen
 ├── models/
-│   └── note.dart             # Note model with gist fields
+│   ├── note.dart                 # Note model with gist fields
+│   └── bookmark.dart             # Bookmark model with metadata
 ├── providers/
-│   ├── notes_provider.dart   # State management, sync, encryption
-│   └── theme_provider.dart   # Theme preferences
+│   ├── notes_provider.dart       # State management, sync, encryption
+│   ├── bookmarks_provider.dart   # Bookmark sync & browser extension
+│   └── theme_provider.dart       # Theme preferences
 ├── services/
-│   ├── database_service.dart     # SQLite storage
+│   ├── database_service.dart     # SQLite storage (notes + bookmarks)
 │   ├── encryption_service.dart   # AES-256, HMAC validation
-│   ├── github_service.dart       # GitHub API sync
+│   ├── github_service.dart       # GitHub API sync (notes + bookmarks)
 │   ├── github_auth_service.dart  # OAuth device flow
 │   ├── gist_service.dart         # Gist sharing
+│   ├── bookmark_service.dart     # Bookmark database operations & metadata
+│   ├── bookmark_server.dart      # HTTP server for browser extension
 │   ├── biometric_service.dart    # Fingerprint/Face unlock
 │   └── debug_service.dart        # In-memory logging
 ├── screens/
 │   ├── lock_screen.dart          # Password/biometric entry
-│   ├── notes_list_screen.dart    # Main UI
+│   ├── notes_list_screen.dart    # Main UI with navigation
 │   ├── note_editor_screen.dart   # Markdown editor
 │   ├── rich_editor_screen.dart   # WYSIWYG editor
-│   ├── settings_screen.dart      # Configuration
+│   ├── scratchpad_screen.dart    # Dynamic scratchpad with tabs
+│   ├── bookmarks_screen.dart     # Bookmark management & search
+│   ├── bookmark_detail_screen.dart # Individual bookmark view/edit
+│   ├── settings_screen.dart      # Configuration + extension settings
 │   ├── github_setup_screen.dart  # GitHub OAuth wizard
 │   ├── gists_screen.dart         # Gist management
 │   └── debug_logs_screen.dart    # Log viewer
@@ -174,7 +205,16 @@ lib/
 ├── utils/
 │   └── snackbar_helper.dart      # Notifications
 └── data/
-    └── welcome_notes.dart        # First-launch guides
+    └── welcome_notes.dart        # 7 first-launch guides
+
+browser-extension/                # Chrome/Firefox/Edge extension
+├── manifest.json                # Extension configuration
+├── background.js                # Service worker for bookmark sync
+├── popup.html                   # Extension popup UI
+├── popup.js                     # Popup functionality
+├── settings.html                # Extension settings page
+├── settings.js                  # Settings functionality
+└── icons/                       # Extension icons (16, 48, 128px)
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed documentation.

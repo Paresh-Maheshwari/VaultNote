@@ -2,7 +2,7 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.10+-blue.svg)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.0+-blue.svg)](https://dart.dev)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](../LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-green.svg)](../LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-lightgrey.svg)]()
 
 > **Encrypted markdown notes with GitHub sync**
@@ -16,6 +16,8 @@ A cross-platform Flutter app for secure note-taking with end-to-end encryption a
 - [Project Structure](#project-structure)
 - [System Architecture](#system-architecture)
 - [Core Components](#core-components)
+- [Browser Extension Integration](#browser-extension-integration)
+- [Dynamic Scratchpad](#dynamic-scratchpad)
 - [Encryption Architecture](#encryption-architecture)
 - [GitHub Sync](#github-sync)
 - [Multi-Device Coordination](#multi-device-coordination)
@@ -27,6 +29,7 @@ A cross-platform Flutter app for secure note-taking with end-to-end encryption a
 - [Dependencies](#dependencies)
 - [Performance](#performance)
 - [Security Considerations](#security-considerations)
+- [Debug Logging](#debug-logging)
 - [Contributing](#contributing)
 
 ---
@@ -37,9 +40,11 @@ A cross-platform Flutter app for secure note-taking with end-to-end encryption a
 lib/
 ├── main.dart                    # App entry, theme setup, lock screen routing
 ├── models/
-│   └── note.dart                # Note data model with gist fields
+│   ├── note.dart                # Note data model with gist fields
+│   └── bookmark.dart            # Bookmark data model with metadata
 ├── providers/
-│   ├── notes_provider.dart      # Main state management (~1700 lines)
+│   ├── notes_provider.dart      # Main state management (~1760 lines)
+│   ├── bookmarks_provider.dart  # Bookmark sync & browser extension
 │   └── theme_provider.dart      # Theme & editor preferences
 ├── services/
 │   ├── database_service.dart    # SQLite local storage
@@ -47,6 +52,8 @@ lib/
 │   ├── github_auth_service.dart # OAuth device flow authentication
 │   ├── github_service.dart      # GitHub API for note sync
 │   ├── gist_service.dart        # GitHub Gist sharing
+│   ├── bookmark_service.dart    # Bookmark database operations & metadata
+│   ├── bookmark_server.dart     # HTTP server for browser extension
 │   ├── biometric_service.dart   # Fingerprint/Face unlock
 │   └── debug_service.dart       # In-memory logging (500 max)
 ├── screens/
@@ -54,6 +61,9 @@ lib/
 │   ├── notes_list_screen.dart   # Main UI with grid/list view
 │   ├── note_editor_screen.dart  # Markdown editor (mobile)
 │   ├── rich_editor_screen.dart  # WYSIWYG editor with slash commands
+│   ├── scratchpad_screen.dart   # Dynamic scratchpad with tabs & colors
+│   ├── bookmarks_screen.dart    # Bookmark management & search
+│   ├── bookmark_detail_screen.dart # Individual bookmark view/edit
 │   ├── settings_screen.dart     # App configuration
 │   ├── github_setup_screen.dart # GitHub OAuth wizard
 │   ├── gists_screen.dart        # Shared gists management
@@ -63,7 +73,16 @@ lib/
 ├── utils/
 │   └── snackbar_helper.dart     # Consistent notifications
 └── data/
-    └── welcome_notes.dart       # 6 first-launch tutorial notes
+    └── welcome_notes.dart       # 7 first-launch tutorial notes
+
+browser-extension/               # Chrome/Firefox/Edge extension
+├── manifest.json               # Extension configuration
+├── background.js               # Service worker for bookmark sync
+├── popup.html                  # Extension popup UI
+├── popup.js                    # Popup functionality
+├── settings.html               # Extension settings page
+├── settings.js                 # Settings functionality
+└── icons/                      # Extension icons (16, 48, 128px)
 ```
 
 ---
@@ -76,23 +95,27 @@ lib/
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────┐  │
 │  │   Flutter   │    │   SQLite    │    │    Secure Storage       │  │
 │  │     UI      │◄──►│  Database   │    │  (HMAC hash, tokens,    │  │
-│  │             │    │ (Plain Text)│    │   biometric password)   │  │
+│  │             │    │(Notes+Books)│    │   biometric password)   │  │
 │  └──────┬──────┘    └─────────────┘    └─────────────────────────┘  │
 │         │                                                           │
-│  ┌──────▼──────┐                                                    │
-│  │ Encryption  │ ◄── Session password (memory only, never saved)    │
-│  │  Service    │                                                    │
-│  └──────┬──────┘                                                    │
-└─────────┼───────────────────────────────────────────────────────────┘
-          │
-          │ Encrypt on upload / Decrypt on download
-          ▼
+│  ┌──────▼──────┐    ┌─────────────┐    ┌─────────────────────────┐  │
+│  │ Encryption  │    │HTTP Server  │    │  Browser Extension      │  │
+│  │  Service    │    │(Port 52525) │◄──►│  (Chrome/Firefox/Edge)  │  │
+│  └─────────────┘    └─────────────┘    └─────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+          │                                    │
+          │ Encrypt notes on upload            │ Bookmark sync
+          ▼                                    ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         GITHUB REPOSITORY                           │
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │ notes/                                                      │    │ 
 │  │   FolderName/                                               │    │
 │  │     1234567890.md  ◄── Encrypted markdown with frontmatter  │    │
+│  │                                                             │    │
+│  │ bookmarks/                                                  │    │
+│  │   FolderName/                                               │    │
+│  │     1704240000000.json  ◄── Bookmark metadata & content     │    │
 │  │                                                             │    │
 │  │ .notes-sync/                                                │    │
 │  │   encryption.json  ◄── Version, enabled, lock status        │    │
@@ -129,9 +152,27 @@ class Note {
 }
 ```
 
+### Bookmark Model
+
+```dart
+class Bookmark {
+  final String id;           // Timestamp-based unique ID
+  final String url;          // Target URL
+  final String title;        // Page title or user-defined
+  final String? description; // Meta description from webpage
+  final String? image;       // Open Graph image URL
+  final String? notes;       // User notes (timestamped entries)
+  final String? favicon;     // Website favicon URL
+  final String folder;       // Organization folder (supports nesting)
+  final List<String> tags;   // Searchable tags
+  final DateTime createdAt;  // Creation timestamp
+  final bool isSynced;       // GitHub sync status
+}
+```
+
 ### NotesProvider
 
-Central state management (~1700 lines):
+Central state management (~1760 lines):
 
 | Category | Methods |
 |----------|---------|
@@ -151,6 +192,29 @@ Key state:
 - `_welcomeNotesCreated` - First launch flag
 - `_passwordChangeDetected` - Multi-device password change
 
+### BookmarksProvider
+
+Bookmark state management with browser extension integration:
+
+| Category | Methods |
+|----------|---------|
+| **CRUD** | `add()`, `update()`, `delete()`, `loadBookmarks()`, `checkDuplicate()` |
+| **Sync** | `syncWithGitHub()`, `syncFromGitHub()`, `syncToGitHub()`, `uploadToGitHub()`, `markAllSynced()` |
+| **Server** | `setExtensionServerEnabled()`, `setExtensionServerHost()`, `setExtensionServerPort()`, `setExtensionApiKey()`, `generateApiKey()` |
+| **Search** | `setSearch()`, `setFolder()` (via getters: `bookmarks`, `folders`) |
+| **Import/Export** | `importJson()`, `importHtml()`, `exportJson()`, `exportHtml()` |
+| **GitHub** | `initGitHub()` |
+
+Key state:
+- `_bookmarks` - All bookmarks in memory
+- `_server` - HTTP server for browser extension
+- `_selectedFolder` - Current folder filter
+- `_searchQuery` - Current search term
+- `_isSyncing` - Sync in progress
+- `_extensionServerEnabled` - Server enabled state
+- `_extensionApiKey` - Optional API key for security
+- `_pendingDeletions` - Queued deletions for GitHub sync
+
 ### Services Overview
 
 | Service | Purpose |
@@ -160,6 +224,8 @@ Key state:
 | `GitHubAuthService` | OAuth device flow, token management |
 | `GitHubService` | Note sync, incremental updates, encryption config |
 | `GistService` | Create/update/delete gists, password protection |
+| `BookmarkService` | Bookmark database operations, metadata fetching |
+| `BookmarkServer` | HTTP server for browser extension communication |
 | `BiometricService` | Fingerprint/Face unlock |
 | `DebugService` | In-memory logging (max 500 entries) |
 
@@ -179,6 +245,7 @@ Key state:
 | Category | Methods |
 |----------|---------|
 | **Notes** | `uploadNote()`, `uploadNoteWithSha()`, `deleteNote()`, `getChangedNotes()`, `fetchFirstNoteContent()` |
+| **Bookmarks** | `uploadBookmark()`, `downloadBookmark()`, `deleteBookmark()`, `getBookmarkFilesWithSha()` |
 | **Tree** | `getShasForNotes()`, `_getRemoteNotesWithSha()`, `_listAllNotePaths()` |
 | **Encryption** | `saveEncryptionVersion()`, `getEncryptionVersion()` |
 | **History** | `clearHistoryWithNotes()`, `deleteAllNotes()` |
@@ -193,6 +260,40 @@ Key state:
 | `deleteGist()` | Delete gist |
 | `fetchGistContent()` | Fetch gist by URL or ID |
 
+### BookmarkService Methods
+
+| Method | Purpose |
+|--------|---------|
+| `getAll()` | Load all bookmarks from SQLite |
+| `getAllFolders()` | Get all unique folders from database |
+| `getFiltered()` | Get bookmarks filtered by folder and search |
+| `insert()` | Insert new bookmark |
+| `update()` | Update existing bookmark |
+| `upsertBatch()` | Batch insert/update bookmarks in transaction |
+| `delete()` | Delete bookmark by ID |
+| `exists()` | Check if bookmark URL exists |
+| `findByUrl()` | Find bookmark by URL |
+| `search()` | Search bookmarks by query |
+| `fetchMetadata()` | Fetch webpage title, description, Open Graph |
+| `exportToJson()` | Export bookmarks to JSON |
+| `importFromJson()` | Import bookmarks from JSON |
+| `exportToHtml()` | Export to browser-compatible HTML |
+| `importFromHtml()` | Import from browser bookmark HTML |
+
+### BookmarkServer Methods
+
+| Method | Purpose |
+|--------|---------|
+| `start()` | Start HTTP server on port 52525 |
+| `stop()` | Stop HTTP server |
+| `isRunning` | Check if server is active |
+
+**Endpoints:**
+- `GET /ping` - Health check
+- `POST /bookmark` - Save bookmark from extension
+- `GET /bookmarks` - Get all bookmarks
+- `GET /folders` - Get folder list
+
 ### DatabaseService Methods
 
 | Method | Purpose |
@@ -204,6 +305,7 @@ Key state:
 | `clearAllNotes()` | Delete all notes |
 | `updateEncryptionVersions()` | Store encryption version per repo |
 | `getEncryptionVersions()` | Get stored encryption version |
+| `clearEncryptionVersions()` | Clear encryption versions for repo |
 
 ### BiometricService Methods
 
@@ -228,6 +330,106 @@ Key state:
 | `pollForToken()` | Poll for OAuth token |
 | `fetchUserRepos()` | List user's repositories |
 | `fetchBranches()` | List repo branches |
+
+---
+
+## Browser Extension Integration
+
+### Extension Architecture
+
+```
+Browser Extension                    VaultNote App
+      │                                    │
+      ├─► Background Service Worker        ├─► HTTP Server (port 52525)
+      ├─► Popup UI                         ├─► BookmarkService
+      ├─► Settings Page                    ├─► BookmarksProvider
+      └─► Context Menus                    └─► GitHub Sync
+              │                                   │
+              └────────── HTTP API ───────────────┘
+```
+
+### Extension Features
+
+| Feature | Description |
+|---------|-------------|
+| **Auto Sync** | Sync VaultNote bookmarks to browser (30s interval) |
+| **Manual Save** | Save current page via popup or context menu |
+| **Folder Management** | Create/organize bookmarks in folders |
+| **API Authentication** | Optional API key for secure communication |
+| **Offline Queue** | Queue bookmarks when app unavailable |
+| **Import Browser** | Import existing browser bookmarks |
+
+### Extension Settings
+
+```javascript
+{
+  host: '127.0.0.1',           // VaultNote server host
+  port: 52525,                 // VaultNote server port
+  syncInterval: 30,            // Auto-sync interval (seconds)
+  defaultFolder: 'Browser Sync', // Default folder for new bookmarks
+  folders: [...],              // Available folders
+  syncFolders: [...],          // Folders to sync to browser
+  excludeFolders: [...],       // Folders to exclude from sync
+  apiKey: ''                   // Optional API key
+}
+```
+
+### Bookmark Sync Flow
+
+```
+1. Extension polls VaultNote every 30s
+         │
+         ▼
+2. GET /bookmarks → Compare with local storage
+         │
+         ├─► New bookmarks → Create in browser
+         ├─► Updated bookmarks → Update in browser  
+         └─► Deleted bookmarks → Remove from browser
+         │
+         ▼
+3. Manual save: POST /bookmark → VaultNote → GitHub
+```
+
+---
+
+## Dynamic Scratchpad
+
+### Scratchpad Features
+
+| Feature | Description |
+|---------|-------------|
+| **Unlimited Tabs** | Create as many tabs as needed |
+| **Editable Names** | Rename tabs (15 character limit) |
+| **Color Coding** | 8 color options for visual organization |
+| **Persistent Storage** | All content auto-saved to SharedPreferences |
+| **Export to Notes** | Convert scratchpad content to permanent notes |
+| **Keyboard Shortcuts** | Ctrl+Q (open), Ctrl+N (new tab), Ctrl+W (close) |
+| **Character Count** | Live character count per tab |
+
+### Scratchpad Storage
+
+```
+SharedPreferences:
+├── scratchpad_tab_count: int           # Number of tabs
+├── scratchpad_tab_names: List<String>  # Tab names
+├── scratchpad_tab_colors: List<String> # Tab colors (ARGB values)
+├── scratchpad_tab_0: String            # Content of tab 0
+├── scratchpad_tab_1: String            # Content of tab 1
+└── ...                                 # Additional tabs
+```
+
+### Scratchpad Architecture
+
+```
+ScratchpadScreen
+    │
+    ├─► TabController (dynamic length)
+    ├─► List<TextEditingController> (one per tab)
+    ├─► List<FocusNode> (focus management)
+    ├─► List<String> _tabNames (editable names)
+    ├─► List<Color> _tabColors (8 color options)
+    └─► SharedPreferences (persistent storage)
+```
 
 ---
 
@@ -300,6 +502,12 @@ repository/
 │   │   └── 1704153600000.md
 │   └── Personal/
 │       └── 1704240000000.md
+├── bookmarks/
+│   ├── Work/
+│   │   ├── 1704067200000.json
+│   │   └── 1704153600000.json
+│   └── Browser Sync/
+│       └── 1704240000000.json
 └── .notes-sync/
     └── encryption.json
 ```
@@ -475,7 +683,7 @@ main()
           └─► NotesListScreen
                   ├─► NotesProvider.init()
                   ├─► Load notes from SQLite
-                  ├─► Create welcome notes (first launch, 6 notes)
+                  ├─► Create welcome notes (first launch, 7 notes)
                   ├─► Load GitHub config
                   ├─► Check encryption sync status
                   └─► Start auto-sync timer (2 min interval)
@@ -491,8 +699,21 @@ NotesListScreen
     ├─► Navigation (Rail on desktop, Bottom on mobile)
     │       ├─► All Notes (index 0)
     │       ├─► Starred (index 1) - _showOnlyStarred filter
-    │       ├─► Gists (index 2) - GistsScreen
-    │       └─► Settings (index 3) - SettingsScreen
+    │       ├─► Bookmarks (index 2) - BookmarksScreen
+    │       ├─► Gists (index 3) - GistsScreen
+    │       └─► Settings (index 4) - SettingsScreen
+    │
+    ├─► Desktop Navigation Rail
+    │       ├─► Only shows All Notes & Starred as destinations
+    │       └─► Trailing section with individual buttons:
+    │           ├─► Scratchpad (opens modal via Navigator.push)
+    │           ├─► Bookmarks (index 2)
+    │           ├─► Gists (index 3)
+    │           └─► Settings (index 4)
+    │
+    ├─► Mobile Bottom Navigation
+    │       ├─► All 5 destinations as NavigationDestination
+    │       └─► Scratchpad accessible via AppBar button (opens modal)
     │
     ├─► Note Actions
     │       ├─► Tap → Open editor (Rich on desktop, Markdown on mobile)
@@ -505,6 +726,19 @@ NotesListScreen
     │       ├─► Filter by tag (multi-select)
     │       ├─► Filter by folder
     │       └─► Sort by title/created/updated (pinned always first)
+    │
+    ├─► Scratchpad Features
+    │       ├─► Dynamic tabs with editable names
+    │       ├─► Color coding (8 options)
+    │       ├─► Export tabs to permanent notes
+    │       └─► Keyboard shortcuts (Ctrl+Q, Ctrl+N, Ctrl+W)
+    │
+    ├─► Bookmark Features
+    │       ├─► Browser extension integration
+    │       ├─► Folder organization with nesting
+    │       ├─► Search by title, URL, description, notes
+    │       ├─► Import/export (JSON, HTML)
+    │       └─► GitHub sync with SHA-based incremental updates
     │
     └─► Editors
             ├─► RichEditorScreen (desktop, AppFlowy WYSIWYG)
@@ -527,11 +761,14 @@ NotesListScreen
 | `Ctrl+N` | New note | Notes list |
 | `Ctrl+F` | Focus search | Notes list |
 | `Ctrl+R` | Refresh/sync | Notes list |
+| `Ctrl+Q` | Open scratchpad | Global |
 | `Ctrl+S` | Save note | Editor |
 | `Ctrl+P` | Toggle preview | Editor |
 | `Esc` | Exit focus/preview | Editor |
 | `Ctrl+B` | Bold | Rich editor |
 | `Ctrl+I` | Italic | Rich editor |
+| `Ctrl+N` | New tab | Scratchpad |
+| `Ctrl+W` | Close tab | Scratchpad |
 
 ---
 
@@ -591,6 +828,8 @@ flutter build ios --release
 | `share_plus` | ^12.0.1 | Share functionality |
 | `file_picker` | ^10.3.8 | File import/export |
 | `intl` | ^0.20.2 | Date formatting |
+| `receive_sharing_intent` | ^1.8.1 | Handle shared content (mobile) |
+| `transparent_image` | ^2.0.1 | Image loading placeholders |
 
 ---
 
@@ -609,10 +848,10 @@ flutter build ios --release
 
 - Single Tree API call for change detection
 - SHA caching (`_localShaCache`) to skip unchanged files
-- Parallel downloads (10 concurrent)
+- Parallel downloads (no specific limit, uses Future.wait)
 - Sequential uploads (avoid conflicts)
 - Upload lock (`_uploadingNotes`) prevents duplicate uploads
-- Pagination (`_pageSize = 20`) for large collections
+- Pagination (`_pageSize = 20` for notes, `_pageSize = 30` for bookmarks) for large collections
 
 ---
 

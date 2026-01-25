@@ -1,3 +1,24 @@
+// ============================================================================
+// NOTE MODEL
+// ============================================================================
+//
+// Data model representing a single note in the app.
+// Stored in SQLite locally and synced to GitHub as markdown files.
+//
+// Features:
+// - Plain text storage locally (fast access)
+// - Encrypted storage on GitHub (AES-256-CBC)
+// - Gist sharing integration (public/secret/protected)
+// - Organization (folders, tags, favorites, pinning)
+// - Sync tracking and timestamps
+//
+// Content Encryption:
+// - Local: Plain text (relies on device encryption)
+// - GitHub: Encrypted with "ENC:" prefix
+// - Gists: Plain or "PENC:" for password protection
+//
+// ============================================================================
+
 /// Note model - represents a single note in the app.
 /// 
 /// Stored in SQLite locally and synced to GitHub as markdown files.

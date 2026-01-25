@@ -19,8 +19,9 @@
 // Navigation:
 // - All Notes (index 0)
 // - Starred (index 1)
-// - Gists (index 2)
-// - Settings (index 3)
+// - Bookmarks (index 2)
+// - Gists (index 3)
+// - Settings (index 4)
 //
 // ============================================================================
 
@@ -31,6 +32,7 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../providers/notes_provider.dart';
 import '../providers/theme_provider.dart';
+import '../providers/bookmarks_provider.dart';
 import '../models/note.dart';
 import '../services/encryption_service.dart';
 import '../services/debug_service.dart';
@@ -39,6 +41,8 @@ import 'note_editor_screen.dart';
 import 'rich_editor_screen.dart';
 import 'settings_screen.dart';
 import 'gists_screen.dart';
+import 'scratchpad_screen.dart';
+import 'bookmarks_screen.dart';
 
 /// Main notes list screen with search, filter, and navigation.
 class NotesListScreen extends StatefulWidget {
@@ -150,6 +154,7 @@ class _NotesListScreenState extends State<NotesListScreen> with WidgetsBindingOb
         const SingleActivator(LogicalKeyboardKey.keyN, control: true): _createNote,
         const SingleActivator(LogicalKeyboardKey.keyF, control: true): () => _searchFocus.requestFocus(),
         const SingleActivator(LogicalKeyboardKey.keyR, control: true): _refresh,
+        const SingleActivator(LogicalKeyboardKey.keyQ, control: true): _toggleScratchpad,
       },
       child: Focus(
         autofocus: true,
@@ -162,6 +167,12 @@ class _NotesListScreenState extends State<NotesListScreen> with WidgetsBindingOb
     final provider = context.read<NotesProvider>();
     provider.loadNotes();
     showAppSnackBar(context, 'Refreshed');
+  }
+
+  void _toggleScratchpad() {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => const ScratchpadScreen(),
+    ));
   }
 
   Widget _buildNotesTab() {
@@ -210,75 +221,131 @@ class _NotesListScreenState extends State<NotesListScreen> with WidgetsBindingOb
 
   Widget _buildDesktopLayout() {
     return Scaffold(
-      body: Row(
+      body: Stack(
         children: [
-          SizedBox(
-            height: MediaQuery.of(context).size.height,
-            child: NavigationRail(
-              selectedIndex: _selectedIndex > 1 ? null : _selectedIndex,
-              onDestinationSelected: (i) {
-                setState(() {
-                  _selectedIndex = i;
-                  _showOnlyStarred = (i == 1); // Index 1 is Starred
-                });
-              },
-              labelType: NavigationRailLabelType.all,
-              leading: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Column(
-                  children: [
-                    FloatingActionButton(
-                      heroTag: 'fab_desktop',
-                      onPressed: _createNote,
-                      child: const Icon(Icons.add),
-                    ),
-                  ],
-                ),
-              ),
-              destinations: const [
-                NavigationRailDestination(icon: Icon(Icons.notes), label: Text('All Notes')),
-                NavigationRailDestination(icon: Icon(Icons.star), label: Text('Starred')),
-                NavigationRailDestination(icon: Icon(Icons.share), label: Text('Gists')),
-              ],
-              trailing: Expanded(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
+          Row(
+            children: [
+              SizedBox(
+                height: MediaQuery.of(context).size.height,
+                child: NavigationRail(
+                  selectedIndex: _selectedIndex > 1 ? null : _selectedIndex,
+                  onDestinationSelected: (i) {
+                    setState(() {
+                      _selectedIndex = i;
+                      _showOnlyStarred = (i == 1); // Index 1 is Starred
+                    });
+                  },
+                  labelType: NavigationRailLabelType.all,
+                  leading: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          icon: Icon(
-                            Icons.settings,
-                            color: _selectedIndex == 3 ? Theme.of(context).colorScheme.primary : null,
-                          ),
-                          onPressed: () => setState(() => _selectedIndex = 3),
-                          tooltip: 'Settings',
-                        ),
-                        Text(
-                          'Settings',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _selectedIndex == 3 
-                              ? Theme.of(context).colorScheme.primary 
-                              : Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        FloatingActionButton(
+                          heroTag: 'fab_desktop',
+                          onPressed: _createNote,
+                          child: const Icon(Icons.add),
                         ),
                       ],
                     ),
                   ),
+                  destinations: const [
+                    NavigationRailDestination(icon: Icon(Icons.notes), label: Text('All Notes')),
+                    NavigationRailDestination(icon: Icon(Icons.star), label: Text('Starred')),
+                  ],
+                  trailing: Expanded(
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit_note),
+                              onPressed: _toggleScratchpad,
+                              tooltip: 'Scratchpad',
+                            ),
+                            Text(
+                              'Scratchpad',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            IconButton(
+                              icon: Icon(
+                                Icons.bookmark_outline,
+                                color: _selectedIndex == 2 ? Theme.of(context).colorScheme.primary : null,
+                              ),
+                              onPressed: () => setState(() => _selectedIndex = 2),
+                              tooltip: 'Bookmarks',
+                            ),
+                            Text(
+                              'Bookmarks',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _selectedIndex == 2 
+                                  ? Theme.of(context).colorScheme.primary 
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            IconButton(
+                              icon: Icon(
+                                Icons.share,
+                                color: _selectedIndex == 3 ? Theme.of(context).colorScheme.primary : null,
+                              ),
+                              onPressed: () => setState(() => _selectedIndex = 3),
+                              tooltip: 'Gists',
+                            ),
+                            Text(
+                              'Gists',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _selectedIndex == 3 
+                                  ? Theme.of(context).colorScheme.primary 
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            IconButton(
+                              icon: Icon(
+                                Icons.settings,
+                                color: _selectedIndex == 4 ? Theme.of(context).colorScheme.primary : null,
+                              ),
+                              onPressed: () => setState(() => _selectedIndex = 4),
+                              tooltip: 'Settings',
+                            ),
+                            Text(
+                              'Settings',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: _selectedIndex == 4 
+                                  ? Theme.of(context).colorScheme.primary 
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-          const VerticalDivider(thickness: 1, width: 1),
-          Expanded(
-            child: _selectedIndex == 0 || _selectedIndex == 1
-              ? _buildNotesTab()
-              : _selectedIndex == 2
-              ? const GistsScreen()
-              : const SettingsScreen(),
+              const VerticalDivider(thickness: 1, width: 1),
+              Expanded(
+                child: _selectedIndex == 0 || _selectedIndex == 1
+                  ? _buildNotesTab()
+                  : _selectedIndex == 2
+                  ? const BookmarksScreen()
+                  : _selectedIndex == 3
+                  ? const GistsScreen()
+                  : _selectedIndex == 4
+                  ? const SettingsScreen()
+                  : const ScratchpadScreen(),
+              ),
+            ],
           ),
         ],
       ),
@@ -287,31 +354,57 @@ class _NotesListScreenState extends State<NotesListScreen> with WidgetsBindingOb
 
   Widget _buildMobileLayout() {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Vaultnote'),
-        actions: [
-          Consumer<NotesProvider>(
-            builder: (context, provider, _) {
-              if (provider.isSyncing) {
-                return const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                );
-              }
-              return IconButton(
-                icon: const Icon(Icons.sync),
-                onPressed: provider.isGitHubConfigured ? () => provider.syncAll() : null,
-                tooltip: 'Sync with GitHub',
-              );
-            },
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              AppBar(
+                title: const Text('Vaultnote'),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.edit_note),
+                    onPressed: _toggleScratchpad,
+                    tooltip: 'Scratchpad',
+                  ),
+                  Consumer<NotesProvider>(
+                    builder: (context, provider, _) {
+                      if (provider.isSyncing) {
+                        return const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                        );
+                      }
+                      return IconButton(
+                        icon: const Icon(Icons.sync),
+                        onPressed: provider.isGitHubConfigured ? () {
+                          provider.syncAll();
+                          // Also sync bookmarks
+                          final bookmarks = context.read<BookmarksProvider>();
+                          if (bookmarks.isGitHubConfigured) {
+                            bookmarks.syncWithGitHub();
+                          }
+                        } : null,
+                        tooltip: 'Sync with GitHub',
+                      );
+                    },
+                  ),
+                ],
+              ),
+              Expanded(
+                child: _selectedIndex == 0 || _selectedIndex == 1
+                  ? _buildNotesTab()
+                  : _selectedIndex == 2
+                  ? const BookmarksScreen()
+                  : _selectedIndex == 3
+                  ? const GistsScreen()
+                  : _selectedIndex == 4
+                  ? const SettingsScreen()
+                  : const ScratchpadScreen(),
+              ),
+            ],
           ),
         ],
       ),
-      body: _selectedIndex == 0 || _selectedIndex == 1
-        ? _buildNotesTab()
-        : _selectedIndex == 2
-        ? const GistsScreen()
-        : const SettingsScreen(),
       floatingActionButton: (_selectedIndex == 0 || _selectedIndex == 1) ? FloatingActionButton(
         heroTag: 'fab_mobile',
         onPressed: _createNote,
@@ -328,6 +421,7 @@ class _NotesListScreenState extends State<NotesListScreen> with WidgetsBindingOb
         destinations: const [
           NavigationDestination(icon: Icon(Icons.notes), label: 'All Notes'),
           NavigationDestination(icon: Icon(Icons.star_outline), label: 'Starred'),
+          NavigationDestination(icon: Icon(Icons.bookmark_outline), label: 'Bookmarks'),
           NavigationDestination(icon: Icon(Icons.share), label: 'Gists'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
@@ -338,7 +432,7 @@ class _NotesListScreenState extends State<NotesListScreen> with WidgetsBindingOb
   Widget _buildSearchBar() {
     final colors = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: Consumer<NotesProvider>(
         builder: (context, provider, _) => Row(
           children: [

@@ -2,8 +2,9 @@
 // GITHUB SERVICE
 // ============================================================================
 //
-// Handles all GitHub API interactions for note sync:
+// Handles all GitHub API interactions for note and bookmark sync:
 // - Upload/download notes as markdown files
+// - Upload/download bookmarks as JSON files
 // - Incremental sync using SHA comparison
 // - Encryption config management (.notes-sync/encryption.json)
 // - Multi-device locking for password changes
@@ -13,6 +14,9 @@
 // notes/
 //   FolderName/
 //     1234567890.md    # Note file (ID as filename)
+// bookmarks/
+//   FolderName/
+//     1234567890.json  # Bookmark file (ID as filename)
 // .notes-sync/
 //   encryption.json    # Encryption version, enabled, lock status
 //
@@ -38,6 +42,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/note.dart';
+import '../models/bookmark.dart';
 import 'github_auth_service.dart';
 import 'debug_service.dart';
 import 'encryption_service.dart';
@@ -85,6 +90,7 @@ tags: [${note.tags.join(', ')}]
 folder: ${note.folder}
 createdAt: ${note.createdAt.toIso8601String()}
 updatedAt: ${note.updatedAt.toIso8601String()}
+isPinned: ${note.isPinned}
 isFavorite: ${note.isFavorite}
 $gistInfo---
 
@@ -95,6 +101,12 @@ $gistInfo---
   /// Parse Note from markdown file content.
   /// Extracts ID from filename first, falls back to frontmatter.
   Note? _parseNoteFromContent(String content, String filePath) {
+    // Validate file path
+    if (filePath.isEmpty || !filePath.contains('/')) {
+      DebugService.log('GitHub', 'Invalid file path: $filePath', isError: true);
+      return null;
+    }
+    
     // Get ID from filename (e.g., "1234567890.md" → "1234567890")
     final fileName = filePath.split('/').last;
     String id = fileName.replaceAll('.md', '');
@@ -134,6 +146,7 @@ $gistInfo---
     String folder = '';
     DateTime createdAt = DateTime.now();
     DateTime updatedAt = DateTime.now();
+    bool isPinned = false;
     bool isFavorite = false;
     String content = '';
     String? gistId;
@@ -155,7 +168,7 @@ $gistInfo---
         break;
       }
       if (inFrontmatter) {
-        if (line.startsWith('id:')) {
+        if (line.startsWith('id:') && line.length > 3) {
           final frontmatterId = line.substring(3).trim();
           if (frontmatterId.isNotEmpty && RegExp(r'^\d{10,}$').hasMatch(frontmatterId)) {
             id = frontmatterId;
@@ -164,27 +177,30 @@ $gistInfo---
             DebugService.log('Sync', 'Invalid frontmatter ID "$frontmatterId" - generated new: $id');
           }
         }
-        if (line.startsWith('title:')) title = line.substring(6).trim();
-        if (line.startsWith('folder:')) folder = line.substring(7).trim();
-        if (line.startsWith('tags:')) {
+        if (line.startsWith('title:') && line.length > 6) title = line.substring(6).trim();
+        if (line.startsWith('folder:') && line.length > 7) folder = line.substring(7).trim();
+        if (line.startsWith('tags:') && line.length > 5) {
           final tagStr = line.substring(5).trim();
           tags = tagStr.replaceAll('[', '').replaceAll(']', '')
               .split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
         }
-        if (line.startsWith('createdAt:')) {
+        if (line.startsWith('createdAt:') && line.length > 10) {
           createdAt = DateTime.tryParse(line.substring(10).trim()) ?? DateTime.now();
         }
-        if (line.startsWith('updatedAt:')) {
+        if (line.startsWith('updatedAt:') && line.length > 10) {
           updatedAt = DateTime.tryParse(line.substring(10).trim()) ?? DateTime.now();
         }
-        if (line.startsWith('isFavorite:')) {
+        if (line.startsWith('isFavorite:') && line.length > 11) {
           isFavorite = line.substring(11).trim() == 'true';
         }
+        if (line.startsWith('isPinned:') && line.length > 9) {
+          isPinned = line.substring(9).trim() == 'true';
+        }
         // Parse gist fields
-        if (line.startsWith('gistId:')) gistId = line.substring(7).trim();
-        if (line.startsWith('gistUrl:')) gistUrl = line.substring(8).trim();
-        if (line.startsWith('gistPublic:')) gistPublic = line.substring(11).trim() == 'true';
-        if (line.startsWith('gistPasswordProtected:')) gistPasswordProtected = line.substring(22).trim() == 'true';
+        if (line.startsWith('gistId:') && line.length > 7) gistId = line.substring(7).trim();
+        if (line.startsWith('gistUrl:') && line.length > 8) gistUrl = line.substring(8).trim();
+        if (line.startsWith('gistPublic:') && line.length > 11) gistPublic = line.substring(11).trim() == 'true';
+        if (line.startsWith('gistPasswordProtected:') && line.length > 22) gistPasswordProtected = line.substring(22).trim() == 'true';
       }
     }
     
@@ -205,6 +221,7 @@ $gistInfo---
       createdAt: createdAt,
       updatedAt: updatedAt,
       isSynced: true,
+      isPinned: isPinned,
       isFavorite: isFavorite,
       gistId: gistId,
       gistUrl: gistUrl,
@@ -216,14 +233,20 @@ $gistInfo---
   /// Get SHA hash of a file on GitHub.
   /// SHA is required for updating existing files.
   Future<String?> _getFileSha(String path) async {
+    if (!isConfigured || path.isEmpty) return null;
+    
     try {
       final url = '$_baseUrl/repos/$owner/$repo/contents/$path?ref=$branch';
       final response = await http.get(Uri.parse(url), headers: _headers);
       if (response.statusCode == 200) {
-        return jsonDecode(response.body)['sha'];
+        final body = jsonDecode(response.body);
+        if (body is Map && body.containsKey('sha')) {
+          return body['sha'] as String?;
+        }
       }
       return null;
     } catch (e) {
+      DebugService.log('GitHub', 'Failed to get SHA for $path: $e', isError: true);
       return null;
     }
   }
@@ -231,8 +254,13 @@ $gistInfo---
   /// Generate GitHub path for a note.
   /// Format: notes/{folder}/{id}.md
   String _getNotePath(Note note) {
+    if (note.id.isEmpty) {
+      throw ArgumentError('Note ID cannot be empty');
+    }
     final folder = note.folder.isNotEmpty ? note.folder : 'Uncategorized';
-    return 'notes/$folder/${note.id}.md';
+    // Sanitize folder name for GitHub path
+    final sanitizedFolder = folder.replaceAll(RegExp(r'[^\w\-_/]'), '_');
+    return 'notes/$sanitizedFolder/${note.id}.md';
   }
 
   /// Get SHAs for multiple notes in parallel.
@@ -730,18 +758,18 @@ $gistInfo---
   /// 2. Create orphan commit (no parents)
   /// 3. Create temp branch pointing to orphan
   /// Clear git history by creating orphan branch with all notes in single commit.
-  /// 1. Create tree with all encrypted notes
+  /// 1. Create tree with all encrypted notes and bookmarks
   /// 2. Create orphan commit with that tree
   /// 3. Delete old branch
   /// 4. Create new branch with same name from orphan
-  Future<bool> clearHistoryWithNotes(List<Note> notes, {int encryptionVersion = 1}) async {
+  Future<bool> clearHistoryWithNotes(List<Note> notes, {int encryptionVersion = 1, List<Bookmark>? bookmarks}) async {
     if (!isConfigured) return false;
     
     try {
-      DebugService.log('GitHub', 'Starting history clear with ${notes.length} notes');
+      DebugService.log('GitHub', 'Starting history clear with ${notes.length} notes and ${bookmarks?.length ?? 0} bookmarks');
       final tempBranch = 'temp-clean-${DateTime.now().millisecondsSinceEpoch}';
       
-      // 1. Create blobs for all notes + encryption config
+      // 1. Create blobs for all notes + encryption config + bookmarks
       final List<Map<String, String>> treeItems = [];
       
       // Add encryption config
@@ -787,6 +815,32 @@ $gistInfo---
           'type': 'blob',
           'sha': jsonDecode(blobRes.body)['sha'],
         });
+      }
+      
+      // Add all bookmarks as blobs
+      if (bookmarks != null) {
+        for (final bookmark in bookmarks) {
+          final sanitizedFolder = bookmark.folder.replaceAll(RegExp(r'[^\w\-_/]'), '_');
+          final path = 'bookmarks/$sanitizedFolder/${bookmark.id}.json';
+          final json = bookmark.toJson()..remove('favicon')..remove('isSynced');
+          final content = base64Encode(utf8.encode(jsonEncode(json)));
+          
+          final blobRes = await http.post(
+            Uri.parse('$_baseUrl/repos/$owner/$repo/git/blobs'),
+            headers: _headers,
+            body: jsonEncode({'content': content, 'encoding': 'base64'}),
+          );
+          if (blobRes.statusCode != 201) {
+            DebugService.log('GitHub', 'Failed to create blob for bookmark ${bookmark.id}', isError: true);
+            continue;
+          }
+          treeItems.add({
+            'path': path,
+            'mode': '100644',
+            'type': 'blob',
+            'sha': jsonDecode(blobRes.body)['sha'],
+          });
+        }
       }
       
       // 2. Create tree with all items
@@ -861,11 +915,243 @@ $gistInfo---
         headers: _headers,
       );
       
+      // Wait for GitHub to propagate the new branch
+      await Future.delayed(const Duration(seconds: 2));
+      
       DebugService.log('GitHub', 'History cleared successfully');
       return true;
     } catch (e) {
       DebugService.log('GitHub', 'clearHistoryWithNotes error: $e', isError: true);
       return false;
+    }
+  }
+
+  /// Gets all bookmark files from GitHub repository using Tree API.
+  /// 
+  /// More efficient than recursive folder traversal - single API call.
+  /// Returns map of path -> SHA for all bookmark files.
+  Future<Map<String, String>> getBookmarkFilesWithSha() async {
+    if (!isConfigured) {
+      DebugService.log('GitHub', 'Get bookmark files failed: not configured', isError: true);
+      return {};
+    }
+    
+    try {
+      // Get branch SHA first
+      final branchUrl = '$_baseUrl/repos/$owner/$repo/branches/$branch';
+      final branchRes = await _getWithRetry(Uri.parse(branchUrl));
+      if (branchRes == null) return {};
+      
+      final treeSha = jsonDecode(branchRes.body)['commit']['sha'];
+      
+      // Get full tree recursively (all files in one request)
+      final treeRes = await _getWithRetry(Uri.parse('$_baseUrl/repos/$owner/$repo/git/trees/$treeSha?recursive=1'));
+      if (treeRes == null || treeRes.statusCode != 200) {
+        DebugService.log('GitHub', 'Tree fetch failed: ${treeRes?.statusCode}', isError: true);
+        return {};
+      }
+      
+      final tree = jsonDecode(treeRes.body)['tree'] as List? ?? [];
+      final Map<String, String> pathsWithSha = {};
+      
+      // Filter for bookmark files only
+      for (final item in tree) {
+        final path = item['path']?.toString();
+        final sha = item['sha']?.toString();
+        if (path != null && sha != null && path.startsWith('bookmarks/') && path.endsWith('.json') && item['type'] == 'blob') {
+          pathsWithSha[path] = sha;
+        }
+      }
+      
+      DebugService.log('GitHub', 'Found ${pathsWithSha.length} bookmark files via tree API');
+      return pathsWithSha;
+    } catch (e) {
+      DebugService.log('GitHub', 'getBookmarkFilesWithSha error: $e', isError: true);
+      return {};
+    }
+  }
+
+  /// Gets all bookmark files from GitHub repository.
+  /// 
+  /// Returns list of file metadata from bookmarks/ folder recursively
+  Future<List<Map<String, dynamic>>> getBookmarkFiles() async {
+    if (!isConfigured) {
+      DebugService.log('GitHub', 'Get files failed: not configured', isError: true);
+      return [];
+    }
+    
+    try {
+      return await _getBookmarkFilesRecursive('bookmarks');
+    } catch (e) {
+      DebugService.log('GitHub', 'getBookmarkFiles error: $e', isError: true);
+      return [];
+    }
+  }
+
+  /// Recursively get bookmark files from folders
+  Future<List<Map<String, dynamic>>> _getBookmarkFilesRecursive(String path) async {
+    final files = <Map<String, dynamic>>[];
+    
+    try {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$path'),
+        headers: _headers,
+      );
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> items = jsonDecode(response.body);
+        
+        for (final item in items) {
+          final itemMap = item as Map<String, dynamic>;
+          if (itemMap['type'] == 'file' && itemMap['name'].endsWith('.json')) {
+            // Add file with full path
+            itemMap['path'] = itemMap['path'];
+            files.add(itemMap);
+          } else if (itemMap['type'] == 'dir') {
+            // Recursively get files from subdirectory
+            final subFiles = await _getBookmarkFilesRecursive(itemMap['path']);
+            files.addAll(subFiles);
+          }
+        }
+      } else if (response.statusCode == 404) {
+        // Folder doesn't exist yet
+        return [];
+      }
+    } catch (e) {
+      DebugService.log('GitHub', 'Error getting files from $path: $e', isError: true);
+    }
+    
+    return files;
+  }
+
+  /// Uploads a bookmark to GitHub as individual JSON file.
+  /// 
+  /// [bookmark] - Bookmark to upload
+  Future<void> uploadBookmark(Bookmark bookmark) async {
+    if (!isConfigured) {
+      DebugService.log('GitHub', 'Upload failed: not configured', isError: true);
+      return;
+    }
+    
+    try {
+      // Create JSON without local-only fields (favicon generated from domain, isSynced is local state)
+      final json = bookmark.toJson()..remove('favicon')..remove('isSynced');
+      final content = base64Encode(utf8.encode(jsonEncode(json)));
+      // Sanitize folder name for GitHub path
+      final sanitizedFolder = bookmark.folder.replaceAll(RegExp(r'[^\w\-_/]'), '_');
+      final path = 'bookmarks/$sanitizedFolder/${bookmark.id}.json';
+      
+      // Use the same method as notes - check if file exists to get SHA
+      String? sha;
+      try {
+        final existingResponse = await http.get(
+          Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$path'),
+          headers: _headers,
+        );
+        if (existingResponse.statusCode == 200) {
+          final existing = jsonDecode(existingResponse.body);
+          sha = existing['sha'];
+        }
+      } catch (_) {
+        // File doesn't exist, will create new
+      }
+      
+      final body = {
+        'message': 'Update bookmark: ${bookmark.title}',
+        'content': content,
+        'branch': branch,
+        if (sha != null) 'sha': sha,
+      };
+      
+      final response = await http.put(
+        Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$path'),
+        headers: _headers,
+        body: jsonEncode(body),
+      );
+      
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception('Failed to upload bookmark: ${response.statusCode}');
+      }
+      
+      DebugService.log('GitHub', 'Uploaded bookmark: ${bookmark.title}');
+    } catch (e) {
+      DebugService.log('GitHub', 'uploadBookmark error: $e', isError: true);
+      rethrow;
+    }
+  }
+
+  /// Downloads a bookmark from GitHub.
+  /// 
+  /// [folder] - Folder name
+  /// [bookmarkId] - ID of bookmark to download
+  /// Returns bookmark or null if not found
+  Future<Bookmark?> downloadBookmark(String folder, String bookmarkId) async {
+    if (!isConfigured) {
+      DebugService.log('GitHub', 'Download failed: not configured', isError: true);
+      return null;
+    }
+    
+    try {
+      final sanitizedFolder = folder.replaceAll(RegExp(r'[^\w\-_/]'), '_');
+      final response = await http.get(
+        Uri.parse('$_baseUrl/repos/$owner/$repo/contents/bookmarks/$sanitizedFolder/$bookmarkId.json?ref=$branch'),
+        headers: _headers,
+      );
+      
+      if (response.statusCode == 200) {
+        final file = jsonDecode(response.body);
+        final content = utf8.decode(base64Decode(file['content'].replaceAll('\n', '')));
+        final bookmarkJson = jsonDecode(content);
+        return Bookmark.fromJson(bookmarkJson);
+      } else if (response.statusCode == 404) {
+        return null;
+      } else {
+        throw Exception('Failed to download bookmark: ${response.statusCode}');
+      }
+    } catch (e) {
+      DebugService.log('GitHub', 'downloadBookmark error: $e', isError: true);
+      return null;
+    }
+  }
+
+  /// Deletes a bookmark from GitHub.
+  /// 
+  /// [folder] - Folder name
+  /// [bookmarkId] - ID of bookmark to delete
+  Future<void> deleteBookmark(String folder, String bookmarkId) async {
+    if (!isConfigured) {
+      DebugService.log('GitHub', 'Delete failed: not configured', isError: true);
+      return;
+    }
+    
+    try {
+      final sanitizedFolder = folder.replaceAll(RegExp(r'[^\w\-_/]'), '_');
+      final path = 'bookmarks/$sanitizedFolder/$bookmarkId.json';
+      
+      // Get file SHA for deletion
+      final response = await http.get(
+        Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$path'),
+        headers: _headers,
+      );
+      
+      if (response.statusCode == 200) {
+        final file = jsonDecode(response.body);
+        final sha = file['sha'];
+        
+        await http.delete(
+          Uri.parse('$_baseUrl/repos/$owner/$repo/contents/$path'),
+          headers: _headers,
+          body: jsonEncode({
+            'message': 'Delete bookmark: $bookmarkId',
+            'sha': sha,
+            'branch': branch,
+          }),
+        );
+        
+        DebugService.log('GitHub', 'Deleted bookmark: $bookmarkId');
+      }
+    } catch (e) {
+      DebugService.log('GitHub', 'deleteBookmark error: $e', isError: true);
     }
   }
 }

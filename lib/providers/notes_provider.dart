@@ -23,7 +23,9 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/note.dart';
+import '../models/bookmark.dart';
 import '../services/database_service.dart';
+import '../services/bookmark_service.dart';
 import '../services/github_service.dart';
 import '../services/github_auth_service.dart';
 import '../services/gist_service.dart';
@@ -98,6 +100,9 @@ class NotesProvider extends ChangeNotifier {
       // Clear database
       await _databaseService.clearAllNotes();
       
+      // Clear bookmarks from database
+      await BookmarkService.clearAllBookmarks();
+      
       // Clear SHA cache file
       await _saveShaCache();
       
@@ -120,17 +125,29 @@ class NotesProvider extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final json = prefs.getString('sha_cache');
-      if (json != null) {
-        _localShaCache = Map<String, String>.from(jsonDecode(json));
+      if (json != null && json.isNotEmpty) {
+        final decoded = jsonDecode(json);
+        if (decoded is Map) {
+          _localShaCache = Map<String, String>.from(decoded);
+          DebugService.log('Cache', 'Loaded ${_localShaCache.length} SHA entries');
+        } else {
+          DebugService.log('Cache', 'Invalid SHA cache format, resetting', isError: true);
+          _localShaCache = {};
+        }
       }
     } catch (e) {
-      _localShaCache = {}; // Reset on corruption
+      DebugService.log('Cache', 'Failed to load SHA cache: $e', isError: true);
+      _localShaCache = {};
     }
   }
   
   Future<void> _saveShaCache() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('sha_cache', jsonEncode(_localShaCache));
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('sha_cache', jsonEncode(_localShaCache));
+    } catch (e) {
+      DebugService.log('Cache', 'Failed to save SHA cache: $e', isError: true);
+    }
   }
   
   // Cached values for performance
@@ -281,7 +298,9 @@ class NotesProvider extends ChangeNotifier {
     DebugService.log('Sync', 'Auto-sync every $_syncIntervalMinutes min');
     _syncTimer = Timer.periodic(Duration(minutes: _syncIntervalMinutes), (_) {
       if (isGitHubConfigured && !_isSyncing) {
-        syncAll();
+        syncAll().catchError((e) {
+          DebugService.log('Sync', 'Auto-sync failed: $e', isError: true);
+        });
       }
     });
   }
@@ -335,10 +354,21 @@ class NotesProvider extends ChangeNotifier {
     
     DebugService.log('Encryption', 'Local: v$localVersion enabled=$localMasterEnabled session=$hasSessionPassword');
     
-    // Always fetch from GitHub to detect remote changes
-    final remoteConfig = await _githubService.getEncryptionVersion();
-    final remoteHasEncryption = remoteConfig != null && (remoteConfig['enabled'] as bool? ?? false);
-    final remoteVersion = remoteConfig?['version'] as int? ?? 0;
+    // Check database cache first (set after clearGitHubAndReupload)
+    final cachedVersions = await _databaseService.getEncryptionVersions(repoKey);
+    int remoteVersion;
+    bool remoteHasEncryption;
+    
+    if (cachedVersions != null && cachedVersions['remote_version'] == localVersion) {
+      // Cache matches local - use it (avoids stale GitHub API response after branch reset)
+      remoteVersion = cachedVersions['remote_version'] as int;
+      remoteHasEncryption = cachedVersions['remote_enabled'] as bool? ?? false;
+    } else {
+      // Fetch from GitHub
+      final remoteConfig = await _githubService.getEncryptionVersion();
+      remoteHasEncryption = remoteConfig != null && (remoteConfig['enabled'] as bool? ?? false);
+      remoteVersion = remoteConfig?['version'] as int? ?? 0;
+    }
     
     DebugService.log('Encryption', 'GitHub: v$remoteVersion enabled=$remoteHasEncryption');
     
@@ -1079,6 +1109,13 @@ class NotesProvider extends ChangeNotifier {
       await _databaseService.updateNote(updated);
       _notes[index] = updated;
       notifyListeners();
+      // Upload single note to GitHub
+      if (isGitHubConfigured && !_uploadingNotes.contains(id)) {
+        _uploadingNotes.add(id);
+        _githubService.uploadNote(updated).then((_) {
+          _uploadingNotes.remove(id);
+        });
+      }
     }
   }
 
@@ -1094,6 +1131,13 @@ class NotesProvider extends ChangeNotifier {
       await _databaseService.updateNote(updated);
       _notes[index] = updated;
       notifyListeners();
+      // Upload single note to GitHub
+      if (isGitHubConfigured && !_uploadingNotes.contains(id)) {
+        _uploadingNotes.add(id);
+        _githubService.uploadNote(updated).then((_) {
+          _uploadingNotes.remove(id);
+        });
+      }
     }
   }
 
@@ -1432,35 +1476,44 @@ class NotesProvider extends ChangeNotifier {
 
   /// Clear GitHub history and re-upload all notes.
   /// Used when enabling encryption to remove unencrypted history.
-  Future<void> clearGitHubAndReupload() async {
+  Future<void> clearGitHubAndReupload({List<Bookmark>? bookmarks}) async {
     if (!_githubService.isConfigured) return;
     
-    final localVersion = await EncryptionService.getEncryptionVersion();
+    // Block other syncs during history clear
+    _isSyncing = true;
+    _isEncryptionOperationInProgress = true;
     
-    // Clear history and upload all notes in single orphan commit
-    final success = await _githubService.clearHistoryWithNotes(_notes, encryptionVersion: localVersion);
-    
-    if (success) {
-      // Update database with fresh state
-      final repoKey = '${_authService?.owner}/${_authService?.repo}';
-      final localEnabled = await EncryptionService.isMasterEncryptionEnabled();
-      await _databaseService.updateEncryptionVersions(
-        repoKey: repoKey,
-        localVersion: localVersion,
-        remoteVersion: localVersion,
-        localEnabled: localEnabled,
-        remoteEnabled: localEnabled,
-      );
+    try {
+      final localVersion = await EncryptionService.getEncryptionVersion();
       
-      // Mark all as synced
-      for (int i = 0; i < _notes.length; i++) {
-        _notes[i] = _notes[i].copyWith(isSynced: true);
-        await _databaseService.updateNote(_notes[i]);
+      // Clear history and upload all notes + bookmarks in single orphan commit
+      final success = await _githubService.clearHistoryWithNotes(_notes, encryptionVersion: localVersion, bookmarks: bookmarks);
+      
+      if (success) {
+        // Update database with fresh state - set remote to match local
+        final repoKey = '${_authService?.owner}/${_authService?.repo}';
+        final localEnabled = await EncryptionService.isMasterEncryptionEnabled();
+        await _databaseService.updateEncryptionVersions(
+          repoKey: repoKey,
+          localVersion: localVersion,
+          remoteVersion: localVersion,  // Remote now matches local
+          localEnabled: localEnabled,
+          remoteEnabled: localEnabled,  // Remote now matches local
+        );
+        
+        // Mark all as synced
+        for (int i = 0; i < _notes.length; i++) {
+          _notes[i] = _notes[i].copyWith(isSynced: true);
+          await _databaseService.updateNote(_notes[i]);
+        }
+        
+        // Clear SHA cache (will rebuild on next sync)
+        _localShaCache.clear();
+        await _saveShaCache();
       }
-      
-      // Clear SHA cache (will rebuild on next sync)
-      _localShaCache.clear();
-      await _saveShaCache();
+    } finally {
+      _isSyncing = false;
+      _isEncryptionOperationInProgress = false;
     }
     
     notifyListeners();
@@ -1470,15 +1523,12 @@ class NotesProvider extends ChangeNotifier {
   Future<void> deleteAndReuploadEncrypted() async {
     if (!_githubService.isConfigured) return;
     
-    // 1. Delete all notes from GitHub
-    await _githubService.deleteAllNotes();
-    
-    // 2. Upload encryption config
+    // 1. Upload encryption config FIRST
     final localVersion = await EncryptionService.getEncryptionVersion();
     final localEnabled = await EncryptionService.isMasterEncryptionEnabled();
     await _githubService.saveEncryptionVersion(version: localVersion, enabled: localEnabled);
     
-    // 3. Update database
+    // 2. Update database
     final repoKey = '${_authService?.owner}/${_authService?.repo}';
     await _databaseService.updateEncryptionVersions(
       repoKey: repoKey,
@@ -1488,7 +1538,7 @@ class NotesProvider extends ChangeNotifier {
       remoteEnabled: localEnabled,
     );
     
-    // 4. Mark all notes unsynced and re-upload
+    // 3. Mark ALL notes unsynced so they get re-uploaded with encryption
     for (int i = 0; i < _notes.length; i++) {
       _notes[i] = _notes[i].copyWith(isSynced: false);
       await _databaseService.updateNote(_notes[i]);
@@ -1496,6 +1546,7 @@ class NotesProvider extends ChangeNotifier {
     _localShaCache.clear();
     await _saveShaCache();
     
+    // 4. Re-upload all notes (now encrypted)
     await syncToGitHub();
     notifyListeners();
   }
